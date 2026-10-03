@@ -52,6 +52,7 @@ export default function Login() {
         </Field>
         <Button type="submit" variant="primary" className="btn-block" loading={busy}>Sign in</Button>
         <p className="small" style={{ textAlign: 'center' }}><Link to="/forgot-password">Forgot your password?</Link></p>
+        <p className="small" style={{ textAlign: 'center' }}>New student? <Link to="/register">Create an account</Link></p>
       </form>
     </div>
   );

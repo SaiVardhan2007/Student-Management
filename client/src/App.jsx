@@ -6,6 +6,7 @@ import { PageLoader } from './components/ui.jsx';
 
 const page = (loader) => lazy(loader);
 const Login = page(() => import('./pages/Login.jsx'));
+const Register = page(() => import('./pages/Register.jsx'));
 const ForgotPassword = page(() => import('./pages/ForgotPassword.jsx'));
 const ResetPassword = page(() => import('./pages/ResetPassword.jsx'));
 const Dashboard = page(() => import('./pages/Dashboard.jsx'));
@@ -69,6 +70,7 @@ export default function App() {
       <Routes>
         <Route element={<GuestOnly />}>
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
         </Route>

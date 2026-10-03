@@ -35,6 +35,15 @@ export function AuthProvider({ children }) {
     return u;
   }, []);
 
+  const register = useCallback(async (payload) => {
+    const res = await api.post('/auth/register', payload);
+    const { user: u, profile: p, ...tokens } = res.data.data;
+    tokenStore.set(tokens);
+    setUser(u);
+    setProfile(p);
+    return u;
+  }, []);
+
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout', { refreshToken: tokenStore.refresh }); } catch { /* already signed out */ }
     clear();
@@ -47,8 +56,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, profile, loading, login, logout, refreshUser, setUser, hasRole: (...r) => !!user && r.includes(user.role) }),
-    [user, profile, loading, login, logout, refreshUser]
+    () => ({ user, profile, loading, login, register, logout, refreshUser, setUser, hasRole: (...r) => !!user && r.includes(user.role) }),
+    [user, profile, loading, login, register, logout, refreshUser]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

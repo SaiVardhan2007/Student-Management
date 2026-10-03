@@ -57,6 +57,21 @@ export const login = asyncHandler(async (req, res) => {
   ok(res, { user, profile: await profileOf(user), ...tokens }, 'Logged in');
 });
 
+// Self sign-up: always creates a student-role account (never admin/faculty). If an admin already added a
+// student record with the same email, the new account is linked to it automatically.
+export const register = asyncHandler(async (req, res) => {
+  const { name, email, password } = req.body;
+  if (await User.exists({ email })) throw AppError.conflict('An account with this email already exists. Please sign in.');
+
+  const user = await User.create({ name, email, password, role: 'student' });
+  await Student.updateOne({ email, user: { $exists: false } }, { user: user._id });
+  req.user = user;
+  await audit(req, 'REGISTER', 'User', user._id);
+  const tokens = await issueTokens(user);
+  res.status(201);
+  ok(res, { user, profile: await profileOf(user), ...tokens }, 'Account created');
+});
+
 export const refresh = asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
   let payload;
