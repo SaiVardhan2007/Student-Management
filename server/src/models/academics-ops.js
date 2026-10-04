@@ -3,10 +3,7 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 const oid = (ref, extra = {}) => ({ type: Schema.Types.ObjectId, ref, ...extra });
 
-export const fileSchema = new Schema(
-  { path: String, originalName: String, mimeType: String, size: Number },
-  { _id: false }
-);
+export const fileSchema = new Schema({ path: String, originalName: String, mimeType: String, size: Number }, { _id: false });
 
 export const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused'];
 

@@ -5,7 +5,10 @@ import DataTable, { Pagination } from '../components/DataTable.jsx';
 import { Badge, EmptyState, ErrorState, Modal, ProgressBar } from '../components/ui.jsx';
 import { ConfirmProvider, useConfirm } from '../components/Confirm.jsx';
 
-const cols = [{ key: 'name', label: 'Name', sortKey: 'name' }, { key: 'age', label: 'Age' }];
+const cols = [
+  { key: 'name', label: 'Name', sortKey: 'name' },
+  { key: 'age', label: 'Age' },
+];
 const row = { _id: '1', name: 'Asha', age: 20 };
 
 describe('DataTable', () => {
@@ -42,7 +45,12 @@ describe('Pagination', () => {
 
 describe('ui primitives', () => {
   it('Badge picks a tone from the status value', () => {
-    render(<><Badge value="verified" /><Badge value="absent" /></>);
+    render(
+      <>
+        <Badge value="verified" />
+        <Badge value="absent" />
+      </>
+    );
     expect(screen.getByText('Verified')).toHaveClass('badge-success');
     expect(screen.getByText('Absent')).toHaveClass('badge-danger');
   });
@@ -55,14 +63,23 @@ describe('ui primitives', () => {
   });
 
   it('EmptyState and ErrorState render messages', () => {
-    render(<><EmptyState title="Nothing" message="Add one" /><ErrorState message="Failed" /></>);
+    render(
+      <>
+        <EmptyState title="Nothing" message="Add one" />
+        <ErrorState message="Failed" />
+      </>
+    );
     expect(screen.getByText('Add one')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Failed');
   });
 
   it('Modal is labelled and closes on Escape', async () => {
     const onClose = vi.fn();
-    render(<Modal title="Edit thing" onClose={onClose}><input aria-label="x" /></Modal>);
+    render(
+      <Modal title="Edit thing" onClose={onClose}>
+        <input aria-label="x" />
+      </Modal>
+    );
     expect(screen.getByRole('dialog', { name: 'Edit thing' })).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
@@ -72,12 +89,22 @@ describe('ui primitives', () => {
 describe('confirm dialog', () => {
   function Demo({ onResult }) {
     const confirm = useConfirm();
-    return <button onClick={async () => onResult(await confirm({ title: 'Delete?', message: 'Really?', danger: true, confirmLabel: 'Yes, delete' }))}>ask</button>;
+    return (
+      <button
+        onClick={async () => onResult(await confirm({ title: 'Delete?', message: 'Really?', danger: true, confirmLabel: 'Yes, delete' }))}
+      >
+        ask
+      </button>
+    );
   }
 
   it('resolves true on confirm and false on cancel (no browser alert)', async () => {
     const onResult = vi.fn();
-    render(<ConfirmProvider><Demo onResult={onResult} /></ConfirmProvider>);
+    render(
+      <ConfirmProvider>
+        <Demo onResult={onResult} />
+      </ConfirmProvider>
+    );
     await userEvent.click(screen.getByText('ask'));
     await userEvent.click(screen.getByRole('button', { name: 'Yes, delete' }));
     expect(onResult).toHaveBeenLastCalledWith(true);

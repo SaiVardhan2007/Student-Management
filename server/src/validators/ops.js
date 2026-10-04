@@ -45,7 +45,13 @@ export const noticeSchema = z.object({
   audience: z.enum(NOTICE_AUDIENCES).default('all'),
   department: optionalId,
   program: optionalId,
-  year: z.coerce.number().int().min(1).max(8).optional().or(z.literal('').transform(() => undefined)),
+  year: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(8)
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
   section: optionalId,
   priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
   publishDate: optionalDate,
@@ -53,7 +59,12 @@ export const noticeSchema = z.object({
 });
 export const noticeUpdateSchema = noticeSchema.partial();
 
-export const materialSchema = z.object({ title: reqStr(200), description: str(1000).optional(), subject: objectId, type: z.enum(MATERIAL_TYPES).default('notes') });
+export const materialSchema = z.object({
+  title: reqStr(200),
+  description: str(1000).optional(),
+  subject: objectId,
+  type: z.enum(MATERIAL_TYPES).default('notes'),
+});
 
 export const calendarSchema = z
   .object({

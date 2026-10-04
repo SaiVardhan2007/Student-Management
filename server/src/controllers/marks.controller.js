@@ -13,11 +13,21 @@ export const enter = asyncHandler(async (req, res) => {
   const subject = await assertSubjectAccess(req, subjectId);
 
   const bad = records.filter((r) => r.marksObtained > maxMarks);
-  if (bad.length) throw AppError.badRequest('Marks obtained cannot exceed maximum marks', bad.map((b) => ({ field: 'records', message: `Student ${b.student}: ${b.marksObtained} > ${maxMarks}` })));
+  if (bad.length)
+    throw AppError.badRequest(
+      'Marks obtained cannot exceed maximum marks',
+      bad.map((b) => ({ field: 'records', message: `Student ${b.student}: ${b.marksObtained} > ${maxMarks}` }))
+    );
 
-  const enrolled = new Set((await Enrollment.find({ subject: subject._id, status: 'enrolled' }).select('student').lean()).map((e) => String(e.student)));
+  const enrolled = new Set(
+    (await Enrollment.find({ subject: subject._id, status: 'enrolled' }).select('student').lean()).map((e) => String(e.student))
+  );
   const notEnrolled = records.filter((r) => !enrolled.has(r.student));
-  if (notEnrolled.length) throw AppError.badRequest(`${notEnrolled.length} student(s) are not enrolled in this subject`, notEnrolled.map((n) => ({ field: 'records', message: `Student ${n.student} is not enrolled` })));
+  if (notEnrolled.length)
+    throw AppError.badRequest(
+      `${notEnrolled.length} student(s) are not enrolled in this subject`,
+      notEnrolled.map((n) => ({ field: 'records', message: `Student ${n.student} is not enrolled` }))
+    );
 
   const existing = await Mark.find({ subject: subject._id, examType, student: { $in: records.map((r) => r.student) } }).lean();
   const prev = new Map(existing.map((m) => [String(m.student), m]));
@@ -31,7 +41,13 @@ export const enter = asyncHandler(async (req, res) => {
       updateOne: {
         filter: { student: r.student, subject: subject._id, examType },
         update: {
-          $set: { marksObtained: r.marksObtained, maxMarks, remarks: r.remarks, semester: subject.semester, ...(old ? { updatedBy: req.user._id } : {}) },
+          $set: {
+            marksObtained: r.marksObtained,
+            maxMarks,
+            remarks: r.remarks,
+            semester: subject.semester,
+            ...(old ? { updatedBy: req.user._id } : {}),
+          },
           $setOnInsert: { enteredBy: req.user._id },
         },
         upsert: true,
@@ -39,11 +55,25 @@ export const enter = asyncHandler(async (req, res) => {
     });
   }
   if (ops.length) await Mark.bulkWrite(ops, { ordered: false });
-  await audit(req, changes.length ? 'MARKS_CHANGED' : 'MARKS_ENTERED', 'Mark', subject._id, { examType, entered: ops.length, changes: changes.slice(0, 50) });
+  await audit(req, changes.length ? 'MARKS_CHANGED' : 'MARKS_ENTERED', 'Mark', subject._id, {
+    examType,
+    entered: ops.length,
+    changes: changes.slice(0, 50),
+  });
 
   if (ops.length) {
-    const students = await Student.find({ _id: { $in: records.map((r) => r.student) } }).select('user').lean();
-    notifyUsers(students.map((s) => s.user), { title: 'New marks published', message: `${examType} marks for ${subject.code} - ${subject.name} are available.`, type: 'marks', link: '/results' });
+    const students = await Student.find({ _id: { $in: records.map((r) => r.student) } })
+      .select('user')
+      .lean();
+    notifyUsers(
+      students.map((s) => s.user),
+      {
+        title: 'New marks published',
+        message: `${examType} marks for ${subject.code} - ${subject.name} are available.`,
+        type: 'marks',
+        link: '/results',
+      }
+    );
   }
   ok(res, { saved: ops.length, unchanged: records.length - ops.length }, 'Marks saved');
 });
@@ -65,7 +95,10 @@ export const subjectMarks = asyncHandler(async (req, res) => {
     if (!byStudent.has(String(m.student))) byStudent.set(String(m.student), {});
     byStudent.get(String(m.student))[m.examType] = { marksObtained: m.marksObtained, maxMarks: m.maxMarks, remarks: m.remarks };
   }
-  ok(res, { subject: { _id: subject._id, code: subject.code, name: subject.name }, students: students.map((s) => ({ ...s, marks: byStudent.get(String(s._id)) || {} })) });
+  ok(res, {
+    subject: { _id: subject._id, code: subject.code, name: subject.name },
+    students: students.map((s) => ({ ...s, marks: byStudent.get(String(s._id)) || {} })),
+  });
 });
 
 export const performance = asyncHandler(async (req, res) => {

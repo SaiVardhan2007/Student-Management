@@ -9,9 +9,7 @@ export async function connectDB(uri = env.mongoUri) {
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
     logger.info(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
   } catch (err) {
-    logger.error(
-      `Cannot connect to MongoDB at ${uri.replace(/\/\/.*@/, '//***@')}. Is MongoDB running locally? (${err.message})`
-    );
+    logger.error(`Cannot connect to MongoDB at ${uri.replace(/\/\/.*@/, '//***@')}. Is MongoDB running locally? (${err.message})`);
     throw err;
   }
 }

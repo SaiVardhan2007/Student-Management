@@ -41,7 +41,9 @@ describe('authentication', () => {
   });
 
   test('blocks NoSQL operator injection in login', async () => {
-    const res = await request(app).post('/api/auth/login').send({ email: { $ne: '' }, password: { $ne: '' } });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: { $ne: '' }, password: { $ne: '' } });
     expect(res.status).toBe(400);
   });
 
@@ -70,11 +72,20 @@ describe('authentication', () => {
 
   test('change password enforces policy and current password', async () => {
     const { accessToken } = await login(app, 'fac2@t.local');
-    const bad = await request(app).post('/api/auth/change-password').set(auth(accessToken)).send({ currentPassword: 'nope', newPassword: 'NewPass@123' });
+    const bad = await request(app)
+      .post('/api/auth/change-password')
+      .set(auth(accessToken))
+      .send({ currentPassword: 'nope', newPassword: 'NewPass@123' });
     expect(bad.status).toBe(400);
-    const weak = await request(app).post('/api/auth/change-password').set(auth(accessToken)).send({ currentPassword: PASSWORD, newPassword: 'weak' });
+    const weak = await request(app)
+      .post('/api/auth/change-password')
+      .set(auth(accessToken))
+      .send({ currentPassword: PASSWORD, newPassword: 'weak' });
     expect(weak.status).toBe(400);
-    const good = await request(app).post('/api/auth/change-password').set(auth(accessToken)).send({ currentPassword: PASSWORD, newPassword: 'NewPass@123' });
+    const good = await request(app)
+      .post('/api/auth/change-password')
+      .set(auth(accessToken))
+      .send({ currentPassword: PASSWORD, newPassword: 'NewPass@123' });
     expect(good.status).toBe(200);
     expect(await login(app, 'fac2@t.local', 'NewPass@123')).toBeTruthy();
     // the old access token is invalidated by the password change
@@ -96,7 +107,9 @@ describe('authentication', () => {
     // unknown emails get the same generic response (no account enumeration)
     const res2 = await request(app).post('/api/auth/forgot-password').send({ email: 'ghost@t.local' });
     expect(res2.body.message).toBe(res.body.message);
-    const bad = await request(app).post('/api/auth/reset-password').send({ token: 'x'.repeat(64), newPassword: 'Another@123' });
+    const bad = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token: 'x'.repeat(64), newPassword: 'Another@123' });
     expect(bad.status).toBe(400);
   });
 });

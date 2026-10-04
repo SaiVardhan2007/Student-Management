@@ -2,11 +2,29 @@ import { z, objectId, optionalId, email, optionalPhone, optionalDate, reqStr, st
 import { STUDENT_STATUSES, ROLES } from '../models/people.js';
 
 const address = z
-  .object({ line1: str(150).optional(), line2: str(150).optional(), city: str(80).optional(), state: str(80).optional(), pincode: str(12).optional(), country: str(60).optional() })
+  .object({
+    line1: str(150).optional(),
+    line2: str(150).optional(),
+    city: str(80).optional(),
+    state: str(80).optional(),
+    pincode: str(12).optional(),
+    country: str(60).optional(),
+  })
   .optional();
 
 const guardian = z
-  .object({ name: str(100).optional(), relation: str(40).optional(), phone: optionalPhone, email: z.string().trim().toLowerCase().email().optional().or(z.literal('').transform(() => undefined)) })
+  .object({
+    name: str(100).optional(),
+    relation: str(40).optional(),
+    phone: optionalPhone,
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email()
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+  })
   .optional();
 
 const emergency = z.object({ name: str(100).optional(), phone: optionalPhone, relation: str(40).optional() }).optional();
@@ -18,7 +36,10 @@ export const studentBase = z.object({
   email,
   phone: optionalPhone,
   dateOfBirth: optionalDate,
-  gender: z.enum(['male', 'female', 'other']).optional().or(z.literal('').transform(() => undefined)),
+  gender: z
+    .enum(['male', 'female', 'other'])
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
   address,
   guardian,
   emergencyContact: emergency,

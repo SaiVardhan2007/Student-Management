@@ -39,17 +39,47 @@ export default function ResetPassword() {
   return (
     <div className="auth-page">
       <form className="card auth-card stack" onSubmit={submit} noValidate>
-        <div><h1>Choose a new password</h1></div>
-        {!token && <div className="form-error-summary" role="alert">This reset link is missing its token. Request a new link.</div>}
-        {error && <div className="form-error-summary" role="alert">{error}</div>}
+        <div>
+          <h1>Choose a new password</h1>
+        </div>
+        {!token && (
+          <div className="form-error-summary" role="alert">
+            This reset link is missing its token. Request a new link.
+          </div>
+        )}
+        {error && (
+          <div className="form-error-summary" role="alert">
+            {error}
+          </div>
+        )}
         <Field label="New password" htmlFor="np" error={errors.newPassword} hint="8+ characters with upper, lower case and a number">
-          <input id="np" className="input" type="password" autoComplete="new-password" value={form.newPassword} aria-invalid={!!errors.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} />
+          <input
+            id="np"
+            className="input"
+            type="password"
+            autoComplete="new-password"
+            value={form.newPassword}
+            aria-invalid={!!errors.newPassword}
+            onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
+          />
         </Field>
         <Field label="Confirm password" htmlFor="cp" error={errors.confirm}>
-          <input id="cp" className="input" type="password" autoComplete="new-password" value={form.confirm} aria-invalid={!!errors.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} />
+          <input
+            id="cp"
+            className="input"
+            type="password"
+            autoComplete="new-password"
+            value={form.confirm}
+            aria-invalid={!!errors.confirm}
+            onChange={(e) => setForm({ ...form, confirm: e.target.value })}
+          />
         </Field>
-        <Button type="submit" variant="primary" loading={busy} disabled={!token}>Reset password</Button>
-        <p className="small" style={{ textAlign: 'center' }}><Link to="/forgot-password">Request a new link</Link></p>
+        <Button type="submit" variant="primary" loading={busy} disabled={!token}>
+          Reset password
+        </Button>
+        <p className="small" style={{ textAlign: 'center' }}>
+          <Link to="/forgot-password">Request a new link</Link>
+        </p>
       </form>
     </div>
   );

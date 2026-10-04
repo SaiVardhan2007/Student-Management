@@ -54,7 +54,10 @@ export const serve = asyncHandler(async (req, res) => {
   const abs = path.resolve(env.uploadDir, category, filename);
   if (!abs.startsWith(path.resolve(env.uploadDir) + path.sep) || !fs.existsSync(abs)) throw AppError.notFound('File not found');
   const ext = path.extname(filename).toLowerCase();
-  res.setHeader('Content-Disposition', `${INLINE.has(ext) && req.query.download !== '1' ? 'inline' : 'attachment'}; filename="${filename}"`);
+  res.setHeader(
+    'Content-Disposition',
+    `${INLINE.has(ext) && req.query.download !== '1' ? 'inline' : 'attachment'}; filename="${filename}"`
+  );
   res.setHeader('Cache-Control', 'private, max-age=300');
   res.sendFile(abs);
 });

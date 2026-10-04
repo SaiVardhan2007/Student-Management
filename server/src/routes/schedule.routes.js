@@ -22,9 +22,14 @@ async function checkExamConflicts(body, current) {
   if (!merged.room) return;
   const day = new Date(merged.date);
   const start = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
-  const others = await Exam.find({ date: { $gte: start, $lt: new Date(start.getTime() + 86400000) }, room: merged.room, _id: { $ne: current?._id } }).lean();
+  const others = await Exam.find({
+    date: { $gte: start, $lt: new Date(start.getTime() + 86400000) },
+    room: merged.room,
+    _id: { $ne: current?._id },
+  }).lean();
   const clash = others.find((o) => overlaps(merged.startTime, merged.endTime, o.startTime, o.endTime));
-  if (clash) throw AppError.conflict(`Room ${merged.room} is already booked for "${clash.name}" (${clash.startTime}-${clash.endTime}) on that date`);
+  if (clash)
+    throw AppError.conflict(`Room ${merged.room} is already booked for "${clash.name}" (${clash.startTime}-${clash.endTime}) on that date`);
 }
 
 async function examScope(req) {
@@ -47,7 +52,11 @@ const exams = crud({
   filterSpec: { subject: 'id', program: 'id', semester: 'number', type: 'string', isPublished: 'bool' },
   allowedSort: ['date', 'name'],
   defaultSort: { date: 1 },
-  populate: [{ path: 'subject', select: 'code name' }, { path: 'program', select: 'name code' }, { path: 'invigilators', select: 'firstName lastName' }],
+  populate: [
+    { path: 'subject', select: 'code name' },
+    { path: 'program', select: 'name code' },
+    { path: 'invigilators', select: 'firstName lastName' },
+  ],
   scope: examScope,
   beforeCreate: async (req) => checkExamConflicts(req.body),
   beforeUpdate: async (req, doc) => {
@@ -59,7 +68,15 @@ const exams = crud({
 });
 
 async function announceExam(doc) {
-  await notifyStudents({ program: doc.program, semester: doc.semester }, { title: `Exam scheduled: ${doc.name}`, message: `${doc.date.toDateString()} ${doc.startTime}-${doc.endTime}${doc.room ? ` in ${doc.room}` : ''}`, type: 'exam', link: '/exams' });
+  await notifyStudents(
+    { program: doc.program, semester: doc.semester },
+    {
+      title: `Exam scheduled: ${doc.name}`,
+      message: `${doc.date.toDateString()} ${doc.startTime}-${doc.endTime}${doc.room ? ` in ${doc.room}` : ''}`,
+      type: 'exam',
+      link: '/exams',
+    }
+  );
 }
 
 const exR = Router();
@@ -69,37 +86,57 @@ exR.post('/', admin, validate(examSchema), exams.create);
 exR.put('/:id', admin, validate(examSchema._def.schema.partial()), exams.update);
 exR.patch('/:id', admin, validate(examSchema._def.schema.partial()), exams.update);
 exR.delete('/:id', admin, exams.remove);
-exR.post('/:id/seating', admin, validate(z.object({ perRoomCapacity: z.coerce.number().int().min(1).max(1000).default(60), prefix: z.string().trim().max(5).default('S') })), asyncHandler(async (req, res) => {
-  requireValidId(req.params.id);
-  const exam = await Exam.findById(req.params.id);
-  if (!exam) throw AppError.notFound('Exam not found');
-  const enrolled = await Enrollment.find({ subject: exam.subject, status: 'enrolled' }).select('student').lean();
-  const students = await Student.find({ _id: { $in: enrolled.map((e) => e.student) }, status: 'active' }).select('studentId').sort({ studentId: 1 }).lean();
-  if (students.length > req.body.perRoomCapacity) throw AppError.badRequest(`Room capacity (${req.body.perRoomCapacity}) is smaller than the number of students (${students.length})`);
-  exam.seating = students.map((s, i) => ({ student: s._id, seat: `${req.body.prefix}-${String(i + 1).padStart(3, '0')}` }));
-  await exam.save();
-  await audit(req, 'EXAM_SEATING_GENERATED', 'Exam', exam._id, { seats: exam.seating.length });
-  ok(res, { seats: exam.seating.length }, 'Seating arrangement generated');
-}));
+exR.post(
+  '/:id/seating',
+  admin,
+  validate(
+    z.object({ perRoomCapacity: z.coerce.number().int().min(1).max(1000).default(60), prefix: z.string().trim().max(5).default('S') })
+  ),
+  asyncHandler(async (req, res) => {
+    requireValidId(req.params.id);
+    const exam = await Exam.findById(req.params.id);
+    if (!exam) throw AppError.notFound('Exam not found');
+    const enrolled = await Enrollment.find({ subject: exam.subject, status: 'enrolled' }).select('student').lean();
+    const students = await Student.find({ _id: { $in: enrolled.map((e) => e.student) }, status: 'active' })
+      .select('studentId')
+      .sort({ studentId: 1 })
+      .lean();
+    if (students.length > req.body.perRoomCapacity)
+      throw AppError.badRequest(`Room capacity (${req.body.perRoomCapacity}) is smaller than the number of students (${students.length})`);
+    exam.seating = students.map((s, i) => ({ student: s._id, seat: `${req.body.prefix}-${String(i + 1).padStart(3, '0')}` }));
+    await exam.save();
+    await audit(req, 'EXAM_SEATING_GENERATED', 'Exam', exam._id, { seats: exam.seating.length });
+    ok(res, { seats: exam.seating.length }, 'Seating arrangement generated');
+  })
+);
 /** Seat for the logged-in student. */
-exR.get('/:id/my-seat', authorize('student'), asyncHandler(async (req, res) => {
-  const exam = await Exam.findOne({ _id: requireValidId(req.params.id), isPublished: true }).lean();
-  if (!exam) throw AppError.notFound('Exam not found');
-  const [me] = await ownStudents(req);
-  const seat = exam.seating?.find((s) => String(s.student) === String(me._id));
-  ok(res, { seat: seat?.seat || null, room: exam.room });
-}));
+exR.get(
+  '/:id/my-seat',
+  authorize('student'),
+  asyncHandler(async (req, res) => {
+    const exam = await Exam.findOne({ _id: requireValidId(req.params.id), isPublished: true }).lean();
+    if (!exam) throw AppError.notFound('Exam not found');
+    const [me] = await ownStudents(req);
+    const seat = exam.seating?.find((s) => String(s.student) === String(me._id));
+    ok(res, { seat: seat?.seat || null, room: exam.room });
+  })
+);
 router.use('/exams', exR);
 
 // ---------------------------------------------------------------- timetable
 async function checkTimetableConflicts(body, current) {
   const m = { ...(current?.toObject?.() || {}), ...body };
-  const others = await Timetable.find({ day: m.day, _id: { $ne: current?._id }, $or: [{ faculty: m.faculty }, { room: m.room }, { section: m.section }] })
+  const others = await Timetable.find({
+    day: m.day,
+    _id: { $ne: current?._id },
+    $or: [{ faculty: m.faculty }, { room: m.room }, { section: m.section }],
+  })
     .populate('subject', 'code')
     .lean();
   for (const o of others) {
     if (!overlaps(m.startTime, m.endTime, o.startTime, o.endTime)) continue;
-    const what = String(o.faculty) === String(m.faculty) ? 'Faculty is' : String(o.section) === String(m.section) ? 'Section is' : 'Room is';
+    const what =
+      String(o.faculty) === String(m.faculty) ? 'Faculty is' : String(o.section) === String(m.section) ? 'Section is' : 'Room is';
     throw AppError.conflict(`${what} already scheduled on ${m.day} ${o.startTime}-${o.endTime} (${o.subject?.code || 'another class'})`);
   }
 }
@@ -110,24 +147,36 @@ const tt = crud({
   filterSpec: { section: 'id', faculty: 'id', day: 'string', subject: 'id', room: 'string' },
   allowedSort: ['day', 'startTime'],
   defaultSort: { startTime: 1 },
-  populate: [{ path: 'subject', select: 'code name' }, { path: 'faculty', select: 'firstName lastName' }, { path: 'section', select: 'name' }],
+  populate: [
+    { path: 'subject', select: 'code name' },
+    { path: 'faculty', select: 'firstName lastName' },
+    { path: 'section', select: 'name' },
+  ],
   beforeCreate: async (req) => checkTimetableConflicts(req.body),
   beforeUpdate: async (req, doc) => checkTimetableConflicts(req.body, doc),
 });
 
 const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const ttR = Router();
-ttR.get('/me', authorize('student', 'faculty', 'parent'), asyncHandler(async (req, res) => {
-  let filter;
-  if (req.user.role === 'faculty') filter = { faculty: (await facultyProfile(req))._id };
-  else {
-    const students = await ownStudents(req);
-    filter = { section: { $in: students.map((s) => s.section).filter(Boolean) } };
-  }
-  const slots = await Timetable.find(filter).populate('subject', 'code name').populate('faculty', 'firstName lastName').populate('section', 'name').lean();
-  slots.sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day) || a.startTime.localeCompare(b.startTime));
-  ok(res, slots);
-}));
+ttR.get(
+  '/me',
+  authorize('student', 'faculty', 'parent'),
+  asyncHandler(async (req, res) => {
+    let filter;
+    if (req.user.role === 'faculty') filter = { faculty: (await facultyProfile(req))._id };
+    else {
+      const students = await ownStudents(req);
+      filter = { section: { $in: students.map((s) => s.section).filter(Boolean) } };
+    }
+    const slots = await Timetable.find(filter)
+      .populate('subject', 'code name')
+      .populate('faculty', 'firstName lastName')
+      .populate('section', 'name')
+      .lean();
+    slots.sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day) || a.startTime.localeCompare(b.startTime));
+    ok(res, slots);
+  })
+);
 ttR.get('/', authorize('admin', 'faculty'), tt.list);
 ttR.get('/:id', authorize('admin', 'faculty'), tt.get);
 ttR.post('/', admin, validate(timetableSchema), tt.create);

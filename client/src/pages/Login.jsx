@@ -39,20 +39,49 @@ export default function Login() {
     <div className="auth-page">
       <form className="card auth-card stack" onSubmit={submit} noValidate>
         <div>
-          <span className="brand-logo" style={{ color: '#fff' }}><Icon name="graduation" size={18} /></span>
+          <span className="brand-logo" style={{ color: '#fff' }}>
+            <Icon name="graduation" size={18} />
+          </span>
           <h1>{settings.collegeName}</h1>
           <p className="muted">Sign in to your account</p>
         </div>
-        {error && <div className="form-error-summary" role="alert">{error}</div>}
+        {error && (
+          <div className="form-error-summary" role="alert">
+            {error}
+          </div>
+        )}
         <Field label="Email" htmlFor="email" error={errors.email}>
-          <input id="email" className="input" type="email" autoComplete="username" value={form.email} aria-invalid={!!errors.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoFocus />
+          <input
+            id="email"
+            className="input"
+            type="email"
+            autoComplete="username"
+            value={form.email}
+            aria-invalid={!!errors.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            autoFocus
+          />
         </Field>
         <Field label="Password" htmlFor="password" error={errors.password}>
-          <input id="password" className="input" type="password" autoComplete="current-password" value={form.password} aria-invalid={!!errors.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <input
+            id="password"
+            className="input"
+            type="password"
+            autoComplete="current-password"
+            value={form.password}
+            aria-invalid={!!errors.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
         </Field>
-        <Button type="submit" variant="primary" className="btn-block" loading={busy}>Sign in</Button>
-        <p className="small" style={{ textAlign: 'center' }}><Link to="/forgot-password">Forgot your password?</Link></p>
-        <p className="small" style={{ textAlign: 'center' }}>New student? <Link to="/register">Create an account</Link></p>
+        <Button type="submit" variant="primary" className="btn-block" loading={busy}>
+          Sign in
+        </Button>
+        <p className="small" style={{ textAlign: 'center' }}>
+          <Link to="/forgot-password">Forgot your password?</Link>
+        </p>
+        <p className="small" style={{ textAlign: 'center' }}>
+          New student? <Link to="/register">Create an account</Link>
+        </p>
       </form>
     </div>
   );

@@ -4,13 +4,36 @@
   "version": "1.0.0",
   "description": "Student Management System — MERN (MongoDB, Express, React, Node), runs fully locally",
   "scripts": {
-    "install:all": "npm --prefix server install && npm --prefix client install",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
     "seed": "npm --prefix server run seed",
     "seed:reset": "npm --prefix server run seed -- --reset",
+    "create-admin": "npm --prefix server run create-admin",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "npm --prefix server test && npm --prefix client test",
+    "test:coverage": "npm --prefix server run test:coverage && npm --prefix client run test:coverage",
+    "test:e2e": "npm --prefix e2e test",
     "build": "npm --prefix client run build",
-    "start": "npm --prefix server start"
+    "start": "npm --prefix server start",
+    "audit": "npm --prefix server audit --omit=dev && npm --prefix client audit --omit=dev",
+    "check": "npm run lint && npm run format:check && npm test && npm run build && npm run smoke",
+    "smoke": "node scripts/smoke-prod.mjs"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.9"
   }
 }

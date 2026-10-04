@@ -7,7 +7,15 @@ const fields = [
   { name: 'firstName', label: 'First name', required: true },
   { name: 'email', label: 'Email', type: 'email', required: true },
   { name: 'guardian.phone', label: 'Guardian phone', type: 'tel' },
-  { name: 'status', label: 'Status', type: 'select', options: [{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }] },
+  {
+    name: 'status',
+    label: 'Status',
+    type: 'select',
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'inactive', label: 'Inactive' },
+    ],
+  },
 ];
 
 describe('DynamicForm', () => {
@@ -34,11 +42,18 @@ describe('DynamicForm', () => {
     await userEvent.selectOptions(screen.getByLabelText(/status/i), 'inactive');
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({ firstName: 'Asha', email: 'asha@example.edu', guardian: { phone: '9876543210' }, status: 'inactive' });
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      firstName: 'Asha',
+      email: 'asha@example.edu',
+      guardian: { phone: '9876543210' },
+      status: 'inactive',
+    });
   });
 
   it('maps API validation errors back onto fields and shows a useful message', async () => {
-    const err = { response: { status: 400, data: { message: 'Validation failed', errors: [{ field: 'email', message: 'Already exists' }] } } };
+    const err = {
+      response: { status: 400, data: { message: 'Validation failed', errors: [{ field: 'email', message: 'Already exists' }] } },
+    };
     render(<DynamicForm fields={fields} initial={{ firstName: 'A', email: 'a@b.co' }} onSubmit={() => Promise.reject(err)} />);
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
     expect(await screen.findByText('Already exists')).toBeInTheDocument();

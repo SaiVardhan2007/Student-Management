@@ -17,8 +17,12 @@ export function SettingsProvider({ children }) {
     }
   }, [user]);
 
-  useEffect(() => { reload(); }, [reload]);
-  useEffect(() => { document.title = settings.collegeName || 'Student Management System'; }, [settings.collegeName]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+  useEffect(() => {
+    document.title = settings.collegeName || 'Student Management System';
+  }, [settings.collegeName]);
 
   const value = useMemo(() => ({ settings, reload }), [settings, reload]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

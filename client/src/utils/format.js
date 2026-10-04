@@ -1,5 +1,6 @@
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
-export const fmtDateTime = (d) => (d ? new Date(d).toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+export const fmtDateTime = (d) =>
+  d ? new Date(d).toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 export const toInputDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 export const toLocalInput = (d) => {
   if (!d) return '';
@@ -13,8 +14,17 @@ export const todayInput = () => {
 };
 export const fmtMoney = (n) => (n == null ? '—' : new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n));
 export const fullName = (o) => (o ? `${o.firstName || ''} ${o.lastName || ''}`.trim() : '—');
-export const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?';
-export const titleCase = (s = '') => String(s).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+export const initials = (name = '') =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join('') || '?';
+export const titleCase = (s = '') =>
+  String(s)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 export const pct = (n) => (n == null ? '—' : `${n}%`);
 export const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
@@ -26,7 +36,10 @@ export function setPath(obj, path, value) {
   let cur = copy;
   keys.forEach((k, i) => {
     if (i === keys.length - 1) cur[k] = value;
-    else { cur[k] = { ...(cur[k] || {}) }; cur = cur[k]; }
+    else {
+      cur[k] = { ...(cur[k] || {}) };
+      cur = cur[k];
+    }
   });
   return copy;
 }

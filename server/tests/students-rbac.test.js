@@ -91,19 +91,37 @@ describe('student management', () => {
   });
 
   test('rejects duplicates (studentId case-insensitive and email)', async () => {
-    const dupId = await request(app).post('/api/students').set(auth(fx.tokens.admin)).send(payload({ studentId: 's900', email: 'other@t.local' }));
+    const dupId = await request(app)
+      .post('/api/students')
+      .set(auth(fx.tokens.admin))
+      .send(payload({ studentId: 's900', email: 'other@t.local' }));
     expect(dupId.status).toBe(409);
-    const dupEmail = await request(app).post('/api/students').set(auth(fx.tokens.admin)).send(payload({ studentId: 'S901' }));
+    const dupEmail = await request(app)
+      .post('/api/students')
+      .set(auth(fx.tokens.admin))
+      .send(payload({ studentId: 'S901' }));
     expect(dupEmail.status).toBe(409);
     expect(await User.countDocuments({ email: 'other@t.local' })).toBe(0);
   });
 
   test('validates required fields, formats, enums and references', async () => {
-    const res = await request(app).post('/api/students').set(auth(fx.tokens.admin)).send({ studentId: '', firstName: 'A', email: 'bad', phone: 'abc', department: 'nope', program: fx.program._id, semester: 99, status: 'weird' });
+    const res = await request(app).post('/api/students').set(auth(fx.tokens.admin)).send({
+      studentId: '',
+      firstName: 'A',
+      email: 'bad',
+      phone: 'abc',
+      department: 'nope',
+      program: fx.program._id,
+      semester: 99,
+      status: 'weird',
+    });
     expect(res.status).toBe(400);
     const fields = res.body.errors.map((e) => e.field);
     expect(fields).toEqual(expect.arrayContaining(['studentId', 'lastName', 'email', 'phone', 'department', 'semester', 'status']));
-    const missingRef = await request(app).post('/api/students').set(auth(fx.tokens.admin)).send(payload({ studentId: 'S902', email: 's902@t.local', department: '64b7f0f0f0f0f0f0f0f0f0f0' }));
+    const missingRef = await request(app)
+      .post('/api/students')
+      .set(auth(fx.tokens.admin))
+      .send(payload({ studentId: 'S902', email: 's902@t.local', department: '64b7f0f0f0f0f0f0f0f0f0f0' }));
     expect(missingRef.status).toBe(400);
   });
 
@@ -124,13 +142,19 @@ describe('student management', () => {
 
   test('update changes fields and keeps the login account in sync', async () => {
     const s = await Student.findOne({ studentId: 'S900' });
-    const res = await request(app).patch(`/api/students/${s._id}`).set(auth(fx.tokens.admin)).send({ firstName: 'Renamed', phone: '9123456780' });
+    const res = await request(app)
+      .patch(`/api/students/${s._id}`)
+      .set(auth(fx.tokens.admin))
+      .send({ firstName: 'Renamed', phone: '9123456780' });
     expect(res.status).toBe(200);
     expect((await User.findById(s.user)).name).toBe('Renamed Student');
   });
 
   test('students can edit only permitted profile fields', async () => {
-    const res = await request(app).patch('/api/students/me').set(auth(fx.tokens.stu1)).send({ phone: '9000011111', status: 'graduated', studentId: 'HACK', semester: 8 });
+    const res = await request(app)
+      .patch('/api/students/me')
+      .set(auth(fx.tokens.stu1))
+      .send({ phone: '9000011111', status: 'graduated', studentId: 'HACK', semester: 8 });
     expect(res.status).toBe(200);
     const s = await Student.findById(fx.students[0]._id);
     expect(s.phone).toBe('9000011111');

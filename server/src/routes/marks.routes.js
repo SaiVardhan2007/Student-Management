@@ -12,7 +12,13 @@ const enterSchema = z.object({
   examType: z.enum(MARK_TYPES),
   maxMarks: z.coerce.number().positive('Maximum marks must be greater than 0').max(1000),
   records: z
-    .array(z.object({ student: objectId, marksObtained: z.coerce.number().min(0, 'Marks cannot be negative').max(1000), remarks: z.string().trim().max(200).optional() }))
+    .array(
+      z.object({
+        student: objectId,
+        marksObtained: z.coerce.number().min(0, 'Marks cannot be negative').max(1000),
+        remarks: z.string().trim().max(200).optional(),
+      })
+    )
     .min(1, 'Enter marks for at least one student')
     .max(500),
 });

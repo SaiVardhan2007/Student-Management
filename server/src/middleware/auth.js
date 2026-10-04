@@ -6,7 +6,9 @@ import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/http.js';
 
 export const signAccessToken = (user) =>
-  jwt.sign({ sub: String(user._id), role: user.role, pca: user.passwordChangedAt?.getTime() ?? 0 }, env.jwtSecret, { expiresIn: env.jwtAccessExpires });
+  jwt.sign({ sub: String(user._id), role: user.role, pca: user.passwordChangedAt?.getTime() ?? 0 }, env.jwtSecret, {
+    expiresIn: env.jwtAccessExpires,
+  });
 
 export const signRefreshToken = (user) =>
   jwt.sign({ sub: String(user._id), type: 'refresh', jti: crypto.randomBytes(12).toString('hex') }, env.jwtRefreshSecret, {

@@ -69,7 +69,8 @@ export function crud(opts) {
     if (!doc) throw AppError.notFound(`${entity} not found`);
     for (const d of opts.dependents || []) {
       const n = await d.Model.countDocuments({ [d.field]: doc._id });
-      if (n) throw AppError.conflict(`Cannot delete ${entity.toLowerCase()}: it is used by ${n} ${d.label}. Remove or reassign them first.`);
+      if (n)
+        throw AppError.conflict(`Cannot delete ${entity.toLowerCase()}: it is used by ${n} ${d.label}. Remove or reassign them first.`);
     }
     if (opts.beforeDelete) await opts.beforeDelete(req, doc);
     await doc.deleteOne();

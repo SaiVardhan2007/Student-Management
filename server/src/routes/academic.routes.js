@@ -83,7 +83,10 @@ const sections = crud({
   filterSpec: { program: 'id', department: 'id', semester: 'number', batch: 'string', isActive: 'bool' },
   allowedSort: ['name', 'semester'],
   defaultSort: { name: 1 },
-  populate: [{ path: 'program', select: 'name code' }, { path: 'department', select: 'name code' }],
+  populate: [
+    { path: 'program', select: 'name code' },
+    { path: 'department', select: 'name code' },
+  ],
   dependents: [
     { Model: M.Student, field: 'section', label: 'student(s)' },
     { Model: M.Timetable, field: 'section', label: 'timetable slot(s)' },
@@ -126,7 +129,8 @@ async function checkSubjectRefs(b) {
   if (b.program) {
     const p = await M.Program.findById(b.program);
     if (!p) throw AppError.badRequest('Program not found');
-    if (b.department && String(p.department) !== String(b.department)) throw AppError.badRequest('Program does not belong to the selected department');
+    if (b.department && String(p.department) !== String(b.department))
+      throw AppError.badRequest('Program does not belong to the selected department');
   }
 }
 
@@ -152,37 +156,62 @@ wire('/semesters', semesters, V.semesterSchema);
 wire('/sections', sections, V.sectionSchema);
 wire('/subjects', subjects, V.subjectSchema, (r) => {
   // (re)build enrolments for one subject or all students of a program/semester
-  r.post('/:id/sync-enrollments', admin, asyncHandler(async (req, res) => {
-    const s = await M.Subject.findById(req.params.id);
-    if (!s) throw AppError.notFound('Subject not found');
-    ok(res, { enrolled: await enrollStudentsInSubject(s, M.Student) }, 'Enrollments synced');
-  }));
+  r.post(
+    '/:id/sync-enrollments',
+    admin,
+    asyncHandler(async (req, res) => {
+      const s = await M.Subject.findById(req.params.id);
+      if (!s) throw AppError.notFound('Subject not found');
+      ok(res, { enrolled: await enrollStudentsInSubject(s, M.Student) }, 'Enrollments synced');
+    })
+  );
 });
 
-router.post('/enrollments/sync', admin, asyncHandler(async (_req, res) => {
-  const students = await M.Student.find({ status: 'active' });
-  let n = 0;
-  for (const s of students) n += await syncEnrollments(s);
-  ok(res, { created: n }, 'Enrollments synced');
-}));
+router.post(
+  '/enrollments/sync',
+  admin,
+  asyncHandler(async (_req, res) => {
+    const students = await M.Student.find({ status: 'active' });
+    let n = 0;
+    for (const s of students) n += await syncEnrollments(s);
+    ok(res, { created: n }, 'Enrollments synced');
+  })
+);
 
 /** Elective enrolment management. */
-router.get('/enrollments', authorize('admin', 'faculty'), asyncHandler(async (req, res) => {
-  const { subject } = req.query;
-  if (!subject) throw AppError.badRequest('subject is required');
-  const items = await M.Enrollment.find({ subject }).populate('student', 'studentId firstName lastName section').lean();
-  ok(res, items);
-}));
-router.post('/enrollments', admin, validate(V.enrollmentSchema), asyncHandler(async (req, res) => {
-  const [student, subject] = await Promise.all([M.Student.findById(req.body.student), M.Subject.findById(req.body.subject)]);
-  if (!student || !subject) throw AppError.notFound('Student or subject not found');
-  const e = await M.Enrollment.findOneAndUpdate({ student: student._id, subject: subject._id }, { $set: { status: 'enrolled', semester: subject.semester } }, { upsert: true, new: true });
-  ok(res, e, 'Student enrolled', 201);
-}));
-router.delete('/enrollments/:id', admin, asyncHandler(async (req, res) => {
-  const e = await M.Enrollment.findByIdAndUpdate(req.params.id, { status: 'dropped' }, { new: true });
-  if (!e) throw AppError.notFound('Enrollment not found');
-  ok(res, e, 'Enrollment dropped');
-}));
+router.get(
+  '/enrollments',
+  authorize('admin', 'faculty'),
+  asyncHandler(async (req, res) => {
+    const { subject } = req.query;
+    if (!subject) throw AppError.badRequest('subject is required');
+    const items = await M.Enrollment.find({ subject }).populate('student', 'studentId firstName lastName section').lean();
+    ok(res, items);
+  })
+);
+router.post(
+  '/enrollments',
+  admin,
+  validate(V.enrollmentSchema),
+  asyncHandler(async (req, res) => {
+    const [student, subject] = await Promise.all([M.Student.findById(req.body.student), M.Subject.findById(req.body.subject)]);
+    if (!student || !subject) throw AppError.notFound('Student or subject not found');
+    const e = await M.Enrollment.findOneAndUpdate(
+      { student: student._id, subject: subject._id },
+      { $set: { status: 'enrolled', semester: subject.semester } },
+      { upsert: true, new: true }
+    );
+    ok(res, e, 'Student enrolled', 201);
+  })
+);
+router.delete(
+  '/enrollments/:id',
+  admin,
+  asyncHandler(async (req, res) => {
+    const e = await M.Enrollment.findByIdAndUpdate(req.params.id, { status: 'dropped' }, { new: true });
+    if (!e) throw AppError.notFound('Enrollment not found');
+    ok(res, e, 'Enrollment dropped');
+  })
+);
 
 export default router;

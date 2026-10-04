@@ -26,6 +26,8 @@ const userSchema = new Schema(
     resetTokenHash: { type: String, select: false },
     resetTokenExpires: { type: Date, select: false },
     passwordChangedAt: Date,
+    failedLogins: { type: Number, default: 0, select: false },
+    lockUntil: { type: Date, select: false },
   },
   { timestamps: true }
 );
@@ -48,6 +50,8 @@ userSchema.set('toJSON', {
     delete ret.resetTokenHash;
     delete ret.resetTokenExpires;
     delete ret.passwordChangedAt;
+    delete ret.failedLogins;
+    delete ret.lockUntil;
     delete ret.__v;
     return ret;
   },

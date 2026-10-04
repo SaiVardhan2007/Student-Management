@@ -50,11 +50,22 @@ export async function summarize(studentId, { from, to, subject } = {}) {
     .map((s) => {
       const counts = foldCounts(s.rows);
       const pct = percentage(counts);
-      return { subject: s.subject, code: s.code, name: s.name, ...counts, total: counts.present + counts.absent + counts.late + counts.excused, percentage: pct, belowThreshold: pct !== null && pct < settings.attendanceThreshold };
+      return {
+        subject: s.subject,
+        code: s.code,
+        name: s.name,
+        ...counts,
+        total: counts.present + counts.absent + counts.late + counts.excused,
+        percentage: pct,
+        belowThreshold: pct !== null && pct < settings.attendanceThreshold,
+      };
     })
     .sort((a, b) => a.code.localeCompare(b.code));
 
-  const overallCounts = subjects.reduce((a, s) => ({ present: a.present + s.present, absent: a.absent + s.absent, late: a.late + s.late, excused: a.excused + s.excused }), { present: 0, absent: 0, late: 0, excused: 0 });
+  const overallCounts = subjects.reduce(
+    (a, s) => ({ present: a.present + s.present, absent: a.absent + s.absent, late: a.late + s.late, excused: a.excused + s.excused }),
+    { present: 0, absent: 0, late: 0, excused: 0 }
+  );
   const overallPct = percentage(overallCounts);
 
   const monthMap = new Map();
@@ -71,7 +82,12 @@ export async function summarize(studentId, { from, to, subject } = {}) {
 
   return {
     threshold: settings.attendanceThreshold,
-    overall: { ...overallCounts, total: Object.values(overallCounts).reduce((a, b) => a + b, 0), percentage: overallPct, belowThreshold: overallPct !== null && overallPct < settings.attendanceThreshold },
+    overall: {
+      ...overallCounts,
+      total: Object.values(overallCounts).reduce((a, b) => a + b, 0),
+      percentage: overallPct,
+      belowThreshold: overallPct !== null && overallPct < settings.attendanceThreshold,
+    },
     subjects,
     months,
   };
@@ -81,7 +97,10 @@ export async function summarize(studentId, { from, to, subject } = {}) {
 export async function subjectPercentages(subjectId, studentIds, { from, to } = {}) {
   const match = { subject: oid(subjectId), student: { $in: studentIds.map(oid) } };
   if (from || to) match.date = { ...(from && { $gte: from }), ...(to && { $lte: to }) };
-  const rows = await Attendance.aggregate([{ $match: match }, { $group: { _id: { student: '$student', status: '$status' }, count: { $sum: 1 } } }]);
+  const rows = await Attendance.aggregate([
+    { $match: match },
+    { $group: { _id: { student: '$student', status: '$status' }, count: { $sum: 1 } } },
+  ]);
   const map = new Map();
   for (const r of rows) {
     const k = String(r._id.student);

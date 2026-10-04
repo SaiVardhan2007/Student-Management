@@ -10,7 +10,11 @@ const POPULATE = [{ path: 'department', select: 'name code' }];
 const FILTERS = { department: 'id', status: 'string', designation: 'string' };
 
 const withSubjects = async (f) => {
-  const subjects = await Subject.find({ faculty: f._id }).populate('program', 'name code').populate('sections', 'name semester').select('code name semester credits type program sections').lean();
+  const subjects = await Subject.find({ faculty: f._id })
+    .populate('program', 'name code')
+    .populate('sections', 'name semester')
+    .select('code name semester credits type program sections')
+    .lean();
   return { ...f.toJSON(), subjects };
 };
 
@@ -43,7 +47,12 @@ export const create = asyncHandler(async (req, res) => {
   if (await Faculty.exists({ $or: [{ employeeId: data.employeeId.toUpperCase() }, { email: data.email }] })) {
     throw AppError.conflict('A faculty member with this Employee ID or email already exists');
   }
-  const { user, temporaryPassword } = await createAccount({ name: `${data.firstName} ${data.lastName}`, email: data.email, role: 'faculty', password });
+  const { user, temporaryPassword } = await createAccount({
+    name: `${data.firstName} ${data.lastName}`,
+    email: data.email,
+    role: 'faculty',
+    password,
+  });
   let f;
   try {
     f = await Faculty.create({ ...data, user: user._id });
@@ -91,7 +100,8 @@ export const assignSubjects = asyncHandler(async (req, res) => {
   const { subjects, sections } = req.body;
   const found = await Subject.find({ _id: { $in: subjects } });
   if (found.length !== subjects.length) throw AppError.badRequest('One or more subjects were not found');
-  if (sections?.length && (await Section.countDocuments({ _id: { $in: sections } })) !== sections.length) throw AppError.badRequest('One or more sections were not found');
+  if (sections?.length && (await Section.countDocuments({ _id: { $in: sections } })) !== sections.length)
+    throw AppError.badRequest('One or more sections were not found');
   // release previously assigned subjects that are not in the new list
   await Subject.updateMany({ faculty: f._id, _id: { $nin: subjects } }, { $unset: { faculty: 1 } });
   await Subject.updateMany({ _id: { $in: subjects } }, { faculty: f._id, ...(sections ? { sections } : {}) });

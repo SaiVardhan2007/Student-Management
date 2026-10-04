@@ -8,11 +8,16 @@ export default function FileLink({ file, label }) {
   if (!file?.path) return <span className="faint">—</span>;
   const open = async (e) => {
     e.preventDefault();
-    try { await openFile(file.path, { download: !/\.(pdf|png|jpe?g)$/i.test(file.path), name: file.originalName }); } catch (err) { toast.error(errorMessage(err, 'Unable to open the file.')); }
+    try {
+      await openFile(file.path, { download: !/\.(pdf|png|jpe?g)$/i.test(file.path), name: file.originalName });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Unable to open the file.'));
+    }
   };
   return (
     <a href="#file" onClick={open} className="row" style={{ gap: 4, display: 'inline-flex' }} title={file.originalName}>
-      <Icon name="paperclip" size={14} /> {label || file.originalName}{file.size ? <span className="faint small"> ({fmtSize(file.size)})</span> : null}
+      <Icon name="paperclip" size={14} /> {label || file.originalName}
+      {file.size ? <span className="faint small"> ({fmtSize(file.size)})</span> : null}
     </a>
   );
 }

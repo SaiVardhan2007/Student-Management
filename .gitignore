@@ -12,3 +12,9 @@ server/uploads/*
 Thumbs.db
 .vscode/
 .idea/
+
+# deployment / test artefacts
+backups/
+e2e/test-results/
+e2e/playwright-report/
+e2e/node_modules/

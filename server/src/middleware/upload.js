@@ -5,7 +5,17 @@ import crypto from 'crypto';
 import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 
-export const UPLOAD_CATEGORIES = ['assignments', 'submissions', 'materials', 'documents', 'notices', 'complaints', 'achievements', 'photos', 'misc'];
+export const UPLOAD_CATEGORIES = [
+  'assignments',
+  'submissions',
+  'materials',
+  'documents',
+  'notices',
+  'complaints',
+  'achievements',
+  'photos',
+  'misc',
+];
 
 const ALLOWED = {
   '.pdf': ['application/pdf'],
@@ -42,8 +52,7 @@ function diskStorage(category) {
   fs.mkdirSync(dir, { recursive: true });
   return multer.diskStorage({
     destination: dir,
-    filename: (_req, file, cb) =>
-      cb(null, `${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
+    filename: (_req, file, cb) => cb(null, `${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
   });
 }
 
@@ -94,7 +103,11 @@ const verified = (mw) => (req, res, next) =>
       for (const f of files) {
         if (!(await signatureOk(f))) {
           files.forEach((x) => x.path && fs.promises.unlink(x.path).catch(() => {}));
-          return next(AppError.badRequest(`"${f.originalname}" does not look like a valid ${path.extname(f.originalname).slice(1).toUpperCase()} file`));
+          return next(
+            AppError.badRequest(
+              `"${f.originalname}" does not look like a valid ${path.extname(f.originalname).slice(1).toUpperCase()} file`
+            )
+          );
         }
       }
       next();

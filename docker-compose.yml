@@ -1,0 +1,76 @@
+# One-command deployment:  cp .env.example .env  (fill in secrets)  &&  docker compose up -d --build
+# Everything runs on your own machine/server — MongoDB and uploaded files stay in local Docker volumes.
+name: student-management-system
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    command: ['--wiredTigerCacheSizeGB', '0.5']
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # not published to the host: only the app container can reach the database
+
+  app:
+    build: .
+    image: student-management-system:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - '${APP_PORT:-5000}:5000'
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/${MONGO_DB:-student_management}
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:5000}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (32+ random characters)}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env (32+ random characters)}
+      JWT_ACCESS_EXPIRES: ${JWT_ACCESS_EXPIRES:-15m}
+      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-7}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-10}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      ALLOW_DEMO_SEED: ${ALLOW_DEMO_SEED:-false}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+    volumes:
+      - uploads:/data/uploads
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # Optional one-off tasks, e.g.:
+  #   docker compose run --rm tools npm run create-admin
+  #   docker compose --profile demo run --rm tools npm run seed
+  tools:
+    profiles: ['tools', 'demo']
+    build: .
+    image: student-management-system:latest
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/${MONGO_DB:-student_management}
+      JWT_SECRET: ${JWT_SECRET:?}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrator}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ALLOW_DEMO_SEED: 'true'
+      SEED_PASSWORD: ${SEED_PASSWORD:-ChangeMe@123}
+    entrypoint: []
+    command: ['node', 'src/scripts/create-admin.js']
+
+volumes:
+  mongo-data:
+  uploads:

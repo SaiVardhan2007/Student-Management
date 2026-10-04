@@ -15,7 +15,17 @@ const POPULATE = [
   { path: 'section', select: 'name' },
   { path: 'academicYear', select: 'name' },
 ];
-const FILTERS = { department: 'id', program: 'id', section: 'id', academicYear: 'id', semester: 'number', status: 'string', batch: 'string', admissionYear: 'number', gender: 'string' };
+const FILTERS = {
+  department: 'id',
+  program: 'id',
+  section: 'id',
+  academicYear: 'id',
+  semester: 'number',
+  status: 'string',
+  batch: 'string',
+  admissionYear: 'number',
+  gender: 'string',
+};
 
 async function listFilter(req) {
   const filter = filtersFromQuery(req.query, FILTERS);
@@ -73,13 +83,24 @@ export const create = asyncHandler(async (req, res) => {
 
 async function assertReferences(data) {
   const checks = [];
-  if (data.department) checks.push(Department.exists({ _id: data.department }).then((x) => x || Promise.reject(AppError.badRequest('Department not found'))));
-  if (data.program) checks.push(Program.findOne({ _id: data.program }).select('department').then((p) => {
-    if (!p) throw AppError.badRequest('Program not found');
-    if (data.department && String(p.department) !== String(data.department)) throw AppError.badRequest('Program does not belong to the selected department');
-  }));
-  if (data.section) checks.push(Section.exists({ _id: data.section }).then((x) => x || Promise.reject(AppError.badRequest('Section not found'))));
-  if (data.academicYear) checks.push(AcademicYear.exists({ _id: data.academicYear }).then((x) => x || Promise.reject(AppError.badRequest('Academic year not found'))));
+  if (data.department)
+    checks.push(Department.exists({ _id: data.department }).then((x) => x || Promise.reject(AppError.badRequest('Department not found'))));
+  if (data.program)
+    checks.push(
+      Program.findOne({ _id: data.program })
+        .select('department')
+        .then((p) => {
+          if (!p) throw AppError.badRequest('Program not found');
+          if (data.department && String(p.department) !== String(data.department))
+            throw AppError.badRequest('Program does not belong to the selected department');
+        })
+    );
+  if (data.section)
+    checks.push(Section.exists({ _id: data.section }).then((x) => x || Promise.reject(AppError.badRequest('Section not found'))));
+  if (data.academicYear)
+    checks.push(
+      AcademicYear.exists({ _id: data.academicYear }).then((x) => x || Promise.reject(AppError.badRequest('Academic year not found')))
+    );
   await Promise.all(checks);
 }
 
@@ -90,7 +111,9 @@ export const update = asyncHandler(async (req, res) => {
   await assertReferences({ ...req.body, department: req.body.department, program: req.body.program });
   const changed = Object.keys(req.body);
   const oldStatus = student.status;
-  const progressed = ['program', 'semester', 'section'].some((k) => req.body[k] !== undefined && String(req.body[k]) !== String(student[k]));
+  const progressed = ['program', 'semester', 'section'].some(
+    (k) => req.body[k] !== undefined && String(req.body[k]) !== String(student[k])
+  );
   student.set(req.body);
   await student.save();
 
@@ -141,7 +164,10 @@ export const activate = asyncHandler(async (req, res) => {
 
 export const uploadPhoto = asyncHandler(async (req, res) => {
   if (!req.file) throw AppError.badRequest('Please choose an image file');
-  const s = req.user.role === 'student' && req.params.id === 'me' ? await studentProfile(req) : await Student.findById(requireValidId(req.params.id));
+  const s =
+    req.user.role === 'student' && req.params.id === 'me'
+      ? await studentProfile(req)
+      : await Student.findById(requireValidId(req.params.id));
   if (!s) throw AppError.notFound('Student not found');
   if (req.user.role === 'student' && String(s.user) !== String(req.user._id)) throw AppError.forbidden();
   removeFile(s.photo);
@@ -172,7 +198,8 @@ export const exportCsv = asyncHandler(async (req, res) => {
 export const enrollments = asyncHandler(async (req, res) => {
   requireValidId(req.params.id);
   await assertStudentAccess(req, req.params.id);
-  const items = await Enrollment.find({ student: req.params.id }).populate({ path: 'subject', select: 'code name credits type semester', populate: { path: 'faculty', select: 'firstName lastName' } }).lean();
+  const items = await Enrollment.find({ student: req.params.id })
+    .populate({ path: 'subject', select: 'code name credits type semester', populate: { path: 'faculty', select: 'firstName lastName' } })
+    .lean();
   ok(res, items);
 });
-

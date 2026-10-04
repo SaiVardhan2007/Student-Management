@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, tokenStore, setSessionExpiredHandler } from '../api/client.js';
+import { api, tokenStore, refreshTokens, setSessionExpiredHandler } from '../api/client.js';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(!!tokenStore.access);
+  const [loading, setLoading] = useState(tokenStore.hasSession);
 
   const clear = useCallback(() => {
     tokenStore.clear();
@@ -19,9 +19,14 @@ export function AuthProvider({ children }) {
   }, [clear]);
 
   useEffect(() => {
-    if (!tokenStore.access) return;
-    api.get('/auth/me')
-      .then((res) => { setUser(res.data.data.user); setProfile(res.data.data.profile); })
+    if (!tokenStore.hasSession) return;
+    // the access token is memory-only, so a page load restores the session through the refresh cookie
+    refreshTokens()
+      .then(() => api.get('/auth/me'))
+      .then((res) => {
+        setUser(res.data.data.user);
+        setProfile(res.data.data.profile);
+      })
       .catch(() => clear())
       .finally(() => setLoading(false));
   }, [clear]);
@@ -45,7 +50,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    try { await api.post('/auth/logout', { refreshToken: tokenStore.refresh }); } catch { /* already signed out */ }
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      /* already signed out */
+    }
     clear();
   }, [clear]);
 

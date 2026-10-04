@@ -8,10 +8,14 @@ export function ConfirmProvider({ children }) {
   const [state, setState] = useState(null);
   const resolver = useRef(null);
 
-  const confirm = useCallback((opts) => new Promise((resolve) => {
-    resolver.current = resolve;
-    setState(opts);
-  }), []);
+  const confirm = useCallback(
+    (opts) =>
+      new Promise((resolve) => {
+        resolver.current = resolve;
+        setState(opts);
+      }),
+    []
+  );
 
   const close = (result) => {
     resolver.current?.(result);

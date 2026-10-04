@@ -29,7 +29,9 @@ export function useFetch(url, params, { enabled = true } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
   return { ...state, reload: load };
 }
 
@@ -46,14 +48,25 @@ export function useListQuery(url, { limit = 15, initialFilters = {}, initialSort
   const q = useFetch(url, params);
 
   // go back to page 1 whenever the query changes
-  useEffect(() => { setPage(1); }, [debounced, sort, filters]);
+  useEffect(() => {
+    setPage(1);
+  }, [debounced, sort, filters]);
 
   return {
     ...q,
     items: q.data || [],
-    page, setPage, search, setSearch, sort, setSort, filters,
+    page,
+    setPage,
+    search,
+    setSearch,
+    sort,
+    setSort,
+    filters,
     setFilter: (k, v) => setFilters((f) => ({ ...f, [k]: v })),
-    resetFilters: () => { setFilters(initialFilters); setSearch(''); },
+    resetFilters: () => {
+      setFilters(initialFilters);
+      setSearch('');
+    },
     hasQuery: !!debounced || Object.values(filters).some((v) => v !== '' && v != null),
   };
 }
@@ -67,10 +80,17 @@ export function useToggle(initial = false) {
 export function useDismiss(ref, onClose, active = true) {
   useEffect(() => {
     if (!active) return undefined;
-    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [ref, onClose, active]);
 }

@@ -15,8 +15,22 @@ export default function Results() {
   const id = isParent ? kid || kids.data[0]._id : 'me';
   return (
     <div className="page">
-      <PageHeader title="Results" subtitle="Subject marks, grades, SGPA and CGPA"
-        actions={isParent && kids.data.length > 1 && <select className="select" aria-label="Select child" value={id} onChange={(e) => setKid(e.target.value)}>{kids.data.map((c) => <option key={c._id} value={c._id}>{fullName(c)}</option>)}</select>} />
+      <PageHeader
+        title="Results"
+        subtitle="Subject marks, grades, SGPA and CGPA"
+        actions={
+          isParent &&
+          kids.data.length > 1 && (
+            <select className="select" aria-label="Select child" value={id} onChange={(e) => setKid(e.target.value)}>
+              {kids.data.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {fullName(c)}
+                </option>
+              ))}
+            </select>
+          )
+        }
+      />
       <ResultsView studentId={id} />
     </div>
   );

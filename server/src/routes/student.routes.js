@@ -10,7 +10,16 @@ r.use(protect);
 
 r.get('/me', authorize('student'), c.getMe);
 r.patch('/me', authorize('student'), validate(selfStudentUpdateSchema), c.updateMe);
-r.post('/me/photo', authorize('student'), uploadImage('photos'), (req, _res, next) => { req.params.id = 'me'; next(); }, c.uploadPhoto);
+r.post(
+  '/me/photo',
+  authorize('student'),
+  uploadImage('photos'),
+  (req, _res, next) => {
+    req.params.id = 'me';
+    next();
+  },
+  c.uploadPhoto
+);
 
 r.get('/export', authorize('admin'), c.exportCsv);
 r.get('/', authorize('admin', 'faculty', 'parent'), c.list);

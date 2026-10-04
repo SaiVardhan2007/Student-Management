@@ -6,7 +6,10 @@ export async function notifyUsers(userIds, { title, message, type = 'general', l
   try {
     const ids = [...new Set(userIds.filter(Boolean).map(String))];
     if (!ids.length) return;
-    await Notification.insertMany(ids.map((user) => ({ user, title, message, type, link })), { ordered: false });
+    await Notification.insertMany(
+      ids.map((user) => ({ user, title, message, type, link })),
+      { ordered: false }
+    );
   } catch (err) {
     logger.error('Failed to create notifications', err);
   }
@@ -15,7 +18,9 @@ export async function notifyUsers(userIds, { title, message, type = 'general', l
 /** Notify students (and their linked parents) matching a Student filter. */
 export async function notifyStudents(studentFilter, payload) {
   try {
-    const students = await Student.find({ ...studentFilter, status: 'active' }).select('user _id').lean();
+    const students = await Student.find({ ...studentFilter, status: 'active' })
+      .select('user _id')
+      .lean();
     const ids = students.map((s) => s.user);
     const parents = await User.find({ role: 'parent', children: { $in: students.map((s) => s._id) } })
       .select('_id')

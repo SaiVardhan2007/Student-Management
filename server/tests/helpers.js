@@ -44,23 +44,63 @@ export async function makeFixtures(app) {
 
   const mkFaculty = async (n) => {
     const user = await M.User.create({ name: `Fac ${n}`, email: `fac${n}@t.local`, password: PASSWORD, role: 'faculty' });
-    return M.Faculty.create({ user: user._id, employeeId: `F${n}`, firstName: 'Fac', lastName: String(n), email: `fac${n}@t.local`, department: dept._id });
+    return M.Faculty.create({
+      user: user._id,
+      employeeId: `F${n}`,
+      firstName: 'Fac',
+      lastName: String(n),
+      email: `fac${n}@t.local`,
+      department: dept._id,
+    });
   };
   const f1 = await mkFaculty(1);
   const f2 = await mkFaculty(2);
   await M.User.create({ name: 'Admin', email: 'admin@t.local', password: PASSWORD, role: 'admin' });
 
-  const sub1 = await M.Subject.create({ code: 'CS101', name: 'Algorithms', department: dept._id, program: program._id, semester: 2, credits: 4, faculty: f1._id });
-  const sub2 = await M.Subject.create({ code: 'CS102', name: 'Databases', department: dept._id, program: program._id, semester: 2, credits: 3, faculty: f2._id });
+  const sub1 = await M.Subject.create({
+    code: 'CS101',
+    name: 'Algorithms',
+    department: dept._id,
+    program: program._id,
+    semester: 2,
+    credits: 4,
+    faculty: f1._id,
+  });
+  const sub2 = await M.Subject.create({
+    code: 'CS102',
+    name: 'Databases',
+    department: dept._id,
+    program: program._id,
+    semester: 2,
+    credits: 3,
+    faculty: f2._id,
+  });
 
   const students = [];
   for (let n = 1; n <= 4; n++) {
     const user = await M.User.create({ name: `Stu ${n}`, email: `stu${n}@t.local`, password: PASSWORD, role: 'student' });
-    const s = await M.Student.create({ user: user._id, studentId: `S${n}`, firstName: 'Stu', lastName: String(n), email: `stu${n}@t.local`, department: dept._id, program: program._id, semester: 2, section: n === 4 ? otherSection._id : section._id, batch: '2025' });
+    const s = await M.Student.create({
+      user: user._id,
+      studentId: `S${n}`,
+      firstName: 'Stu',
+      lastName: String(n),
+      email: `stu${n}@t.local`,
+      department: dept._id,
+      program: program._id,
+      semester: 2,
+      section: n === 4 ? otherSection._id : section._id,
+      batch: '2025',
+    });
     await syncEnrollments(s);
     students.push(s);
   }
-  const parent = await M.User.create({ name: 'Parent', email: 'parent@t.local', password: PASSWORD, role: 'parent', children: [students[0]._id] });
+  const parent = await M.User.create({
+    name: 'Parent',
+    email: 'parent@t.local',
+    password: PASSWORD,
+    role: 'parent',
+    children: [students[0]._id],
+  });
 
   const tokens = {
     admin: (await login(app, 'admin@t.local')).accessToken,

@@ -27,7 +27,14 @@ export const academicYearSchema = dateRange(
 );
 
 export const semesterSchema = dateRange(
-  z.object({ name: reqStr(60), number: z.coerce.number().int().min(1).max(12), academicYear: objectId, startDate: dateField, endDate: dateField, isCurrent: bool.optional() })
+  z.object({
+    name: reqStr(60),
+    number: z.coerce.number().int().min(1).max(12),
+    academicYear: objectId,
+    startDate: dateField,
+    endDate: dateField,
+    isCurrent: bool.optional(),
+  })
 );
 
 export const sectionSchema = z.object({

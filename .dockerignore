@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/coverage
+.git
+.github
+.claude
+.vscode
+**/.env
+**/.env.*
+!**/.env.example
+server/uploads
+server/src/logs
+e2e
+docs
+*.md
+Dockerfile
+docker-compose*.yml

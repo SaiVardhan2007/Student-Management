@@ -22,7 +22,8 @@ export default function Register() {
     if (form.name.trim().length < 2) found.name = 'Full name is required';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) found.email = 'Enter a valid email address';
     if (form.password.length < 8) found.password = 'Password must be at least 8 characters';
-    else if (!/[a-z]/.test(form.password) || !/[A-Z]/.test(form.password) || !/[0-9]/.test(form.password)) found.password = 'Use upper and lower case letters and a number';
+    else if (!/[a-z]/.test(form.password) || !/[A-Z]/.test(form.password) || !/[0-9]/.test(form.password))
+      found.password = 'Use upper and lower case letters and a number';
     if (form.confirm !== form.password) found.confirm = 'Passwords do not match';
     setErrors(found);
     if (Object.keys(found).length) return;
@@ -42,25 +43,67 @@ export default function Register() {
     <div className="auth-page">
       <form className="card auth-card stack" onSubmit={submit} noValidate>
         <div>
-          <span className="brand-logo" style={{ color: '#fff' }}><Icon name="graduation" size={18} /></span>
+          <span className="brand-logo" style={{ color: '#fff' }}>
+            <Icon name="graduation" size={18} />
+          </span>
           <h1>{settings.collegeName}</h1>
           <p className="muted">Create your student account.</p>
         </div>
-        {error && <div className="form-error-summary" role="alert">{error}</div>}
+        {error && (
+          <div className="form-error-summary" role="alert">
+            {error}
+          </div>
+        )}
         <Field label="Full name" htmlFor="name" error={errors.name}>
-          <input id="name" className="input" autoComplete="name" value={form.name} aria-invalid={!!errors.name} onChange={set('name')} autoFocus />
+          <input
+            id="name"
+            className="input"
+            autoComplete="name"
+            value={form.name}
+            aria-invalid={!!errors.name}
+            onChange={set('name')}
+            autoFocus
+          />
         </Field>
         <Field label="Email" htmlFor="email" error={errors.email}>
-          <input id="email" className="input" type="email" autoComplete="username" value={form.email} aria-invalid={!!errors.email} onChange={set('email')} />
+          <input
+            id="email"
+            className="input"
+            type="email"
+            autoComplete="username"
+            value={form.email}
+            aria-invalid={!!errors.email}
+            onChange={set('email')}
+          />
         </Field>
         <Field label="Password" htmlFor="password" error={errors.password}>
-          <input id="password" className="input" type="password" autoComplete="new-password" value={form.password} aria-invalid={!!errors.password} onChange={set('password')} />
+          <input
+            id="password"
+            className="input"
+            type="password"
+            autoComplete="new-password"
+            value={form.password}
+            aria-invalid={!!errors.password}
+            onChange={set('password')}
+          />
         </Field>
         <Field label="Confirm password" htmlFor="confirm" error={errors.confirm}>
-          <input id="confirm" className="input" type="password" autoComplete="new-password" value={form.confirm} aria-invalid={!!errors.confirm} onChange={set('confirm')} />
+          <input
+            id="confirm"
+            className="input"
+            type="password"
+            autoComplete="new-password"
+            value={form.confirm}
+            aria-invalid={!!errors.confirm}
+            onChange={set('confirm')}
+          />
         </Field>
-        <Button type="submit" variant="primary" className="btn-block" loading={busy}>Create account</Button>
-        <p className="small" style={{ textAlign: 'center' }}>Already have an account? <Link to="/login">Sign in</Link></p>
+        <Button type="submit" variant="primary" className="btn-block" loading={busy}>
+          Create account
+        </Button>
+        <p className="small" style={{ textAlign: 'center' }}>
+          Already have an account? <Link to="/login">Sign in</Link>
+        </p>
       </form>
     </div>
   );

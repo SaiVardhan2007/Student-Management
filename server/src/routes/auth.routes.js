@@ -8,7 +8,7 @@ const r = Router();
 
 const loginSchema = z.object({ email, password: z.string().min(1, 'Password is required').max(128) });
 const registerSchema = z.object({ name: z.string().trim().min(2, 'Name is required').max(120), email, password });
-const refreshSchema = z.object({ refreshToken: z.string().min(10) });
+const refreshSchema = z.object({ refreshToken: z.string().min(10).optional() });
 const changeSchema = z.object({ currentPassword: z.string().min(1), newPassword: password });
 const forgotSchema = z.object({ email });
 const resetSchema = z.object({ token: z.string().min(20).max(200), newPassword: password });

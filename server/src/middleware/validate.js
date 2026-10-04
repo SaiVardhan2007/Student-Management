@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import { AppError } from '../utils/AppError.js';
 
-export const formatZodError = (err) =>
-  err.issues.map((i) => ({ field: i.path.join('.') || '(root)', message: i.message }));
+export const formatZodError = (err) => err.issues.map((i) => ({ field: i.path.join('.') || '(root)', message: i.message }));
 
 /** validate(schema[, 'body'|'query'|'params']) — replaces the source with parsed (coerced, stripped) data. */
 export const validate =
@@ -19,7 +18,10 @@ export const validate =
 
 // ---- shared field validators ----
 export const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
-export const optionalId = objectId.optional().or(z.literal('').transform(() => undefined)).or(z.null().transform(() => undefined));
+export const optionalId = objectId
+  .optional()
+  .or(z.literal('').transform(() => undefined))
+  .or(z.null().transform(() => undefined));
 export const email = z.string().trim().toLowerCase().email('Invalid email address');
 export const phone = z
   .string()
@@ -41,3 +43,9 @@ export const password = z
 export const str = (max = 200) => z.string().trim().max(max);
 export const reqStr = (max = 200) => z.string().trim().min(1, 'Required').max(max);
 export { z };
+
+/** Returns the first password-policy violation as a message, or null when the password is acceptable. */
+export function passwordProblem(value) {
+  const r = password.safeParse(value);
+  return r.success ? null : r.error.issues[0].message;
+}

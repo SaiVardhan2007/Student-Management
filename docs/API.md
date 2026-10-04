@@ -7,6 +7,15 @@ Base URL (local): `http://localhost:5000/api`  ·  All bodies are JSON unless no
 **Authentication** — `Authorization: Bearer <accessToken>` on every endpoint except those marked *Public*.
 Access tokens live 15 minutes; use `POST /auth/refresh` (refresh tokens rotate and are single use).
 
+**Token transport** — browser clients send `X-Token-Transport: cookie`; the server then keeps the refresh token in an
+`httpOnly; SameSite=Strict; Path=/api/auth` cookie (`Secure` when `COOKIE_SECURE=true`) and omits it from the JSON body, so
+`/auth/refresh` and `/auth/logout` need no body. Other clients (scripts, tests) omit the header and receive `refreshToken` in the
+body, passing it back in the body as before.
+
+**Request ids** — every response carries `X-Request-Id` (a client-supplied value is echoed); it also appears in the server log.
+
+**Operations** — `GET /health` (liveness) and `GET /ready` (503 until MongoDB is connected) are public and unauthenticated.
+
 **Success envelope**
 ```json
 { "success": true, "message": "OK", "data": { }, "meta": { "page": 1, "limit": 20, "total": 134, "pages": 7 } }
@@ -24,7 +33,8 @@ Access tokens live 15 minutes; use `POST /auth/refresh` (refresh tokens rotate a
 | 403 | Authenticated but role/ownership does not allow it (or account deactivated) |
 | 404 | Not found (also used when a record exists but is outside your scope) |
 | 409 | Conflict — duplicate key, already reviewed, room/faculty clash, dependent records |
-| 413/429 | Body too large / rate limited |
+| 413 | Request body too large |
+| 429 | Rate limited, or account temporarily locked after repeated failed logins |
 | 500 | Unexpected error (details only in server logs; no stack traces in production) |
 
 **List endpoints** accept `?page=1&limit=20&search=text&sort=field|-field` plus resource-specific filters.
@@ -42,11 +52,11 @@ are served only through `GET /files/:category/:filename` (login required; docume
 ## Auth — `/auth`
 | Method & path | Auth | Body / params | Response · errors |
 |---|---|---|---|
-| POST `/auth/login` | Public (20/15 min/IP) | `{ email, password }` | `{ user, profile, accessToken, refreshToken }` · 401 wrong credentials, 403 deactivated |
-| POST `/auth/refresh` | Public | `{ refreshToken }` | new `{ accessToken, refreshToken }` (old one is revoked) · 401 |
+| POST `/auth/login` | Public (20/15 min/IP) | `{ email, password }` | `{ user, profile, accessToken, refreshToken* }` · 401 wrong credentials, 403 deactivated, 429 locked (5 failures → 15 min) |
+| POST `/auth/refresh` | Public | `{ refreshToken }` or the refresh cookie | new `{ accessToken, refreshToken* }` (old one is revoked) · 401 |
 | POST `/auth/forgot-password` | Public | `{ email }` | Always the same generic message. Dev mode returns `resetLink`; the link is also written to the API console (no email server is used) |
 | POST `/auth/reset-password` | Public | `{ token, newPassword }` | 400 invalid/expired token or weak password |
-| POST `/auth/logout` | Any | `{ refreshToken }` | Revokes that refresh token |
+| POST `/auth/logout` | Any | `{ refreshToken }` or the refresh cookie | Revokes that refresh token and clears the cookie |
 | GET `/auth/me` | Any | – | `{ user, profile }` |
 | POST `/auth/change-password` | Any | `{ currentPassword, newPassword }` | New tokens; all other sessions are signed out · 400 |
 

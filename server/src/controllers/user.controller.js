@@ -25,7 +25,8 @@ export const create = asyncHandler(async (req, res) => {
   if (data.role === 'student' || data.role === 'faculty') {
     throw AppError.badRequest('Create students and faculty from their own pages so their profiles are set up correctly');
   }
-  if (children?.length && (await Student.countDocuments({ _id: { $in: children } })) !== children.length) throw AppError.badRequest('One or more linked students were not found');
+  if (children?.length && (await Student.countDocuments({ _id: { $in: children } })) !== children.length)
+    throw AppError.badRequest('One or more linked students were not found');
   const { user, temporaryPassword } = await createAccount(data);
   if (children?.length) {
     user.children = children;
@@ -50,7 +51,10 @@ export const update = asyncHandler(async (req, res) => {
   user.set(req.body);
   if (req.body.isActive === false) user.set('refreshTokens', []);
   await user.save();
-  await audit(req, roleChanged ? 'USER_PERMISSIONS_CHANGED' : 'USER_UPDATED', 'User', user._id, { fields: Object.keys(req.body), role: user.role });
+  await audit(req, roleChanged ? 'USER_PERMISSIONS_CHANGED' : 'USER_UPDATED', 'User', user._id, {
+    fields: Object.keys(req.body),
+    role: user.role,
+  });
   ok(res, user, 'User updated');
 });
 

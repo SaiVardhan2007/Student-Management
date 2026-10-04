@@ -25,7 +25,9 @@ export async function assertSubjectAccess(req, subjectId) {
 /** Subject ids visible to a student (their enrolments). */
 export async function studentSubjectIds(req) {
   const s = await studentProfile(req);
-  const en = await Enrollment.find({ student: s._id, status: { $ne: 'dropped' } }).select('subject').lean();
+  const en = await Enrollment.find({ student: s._id, status: { $ne: 'dropped' } })
+    .select('subject')
+    .lean();
   return en.map((e) => e.subject);
 }
 

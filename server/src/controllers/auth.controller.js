@@ -8,6 +8,7 @@ import { asyncHandler, ok } from '../utils/http.js';
 import { signAccessToken, signRefreshToken } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
 import { logger } from '../utils/logger.js';
+import { readCookie, REFRESH_COOKIE, setRefreshCookie, clearRefreshCookie, wantsCookieTransport } from '../utils/cookies.js';
 
 // compared against when the account does not exist, so response time does not reveal valid emails
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
@@ -27,6 +28,16 @@ async function issueTokens(user) {
   return { accessToken, refreshToken };
 }
 
+/** Send tokens: SPA clients get the refresh token as an httpOnly cookie, other clients in the JSON body. */
+function sendTokens(req, res, tokens, extra, message) {
+  const { refreshToken, ...rest } = tokens;
+  if (wantsCookieTransport(req)) {
+    setRefreshCookie(res, refreshToken);
+    return ok(res, { ...extra, ...rest }, message);
+  }
+  return ok(res, { ...extra, ...rest, refreshToken }, message);
+}
+
 async function profileOf(user) {
   if (user.role === 'student') {
     const s = await Student.findOne({ user: user._id }).select('studentId firstName lastName photo department program semester section');
@@ -41,20 +52,35 @@ async function profileOf(user) {
 
 export const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email }).select('+password');
+  const user = await User.findOne({ email }).select('+password +failedLogins +lockUntil');
+  if (user?.lockUntil && user.lockUntil > new Date()) {
+    await bcrypt.compare(password, DUMMY_HASH);
+    const mins = Math.ceil((user.lockUntil - Date.now()) / 60000);
+    throw new AppError(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`, 429);
+  }
   const valid = user ? await user.comparePassword(password) : (await bcrypt.compare(password, DUMMY_HASH), false);
   if (!valid) {
+    if (user) {
+      user.failedLogins = (user.failedLogins || 0) + 1;
+      if (user.failedLogins >= env.lockoutMaxAttempts) {
+        user.lockUntil = new Date(Date.now() + env.lockoutMinutes * 60000);
+        user.failedLogins = 0;
+      }
+      await user.save({ validateModifiedOnly: true });
+    }
     await audit({ ip: req.ip, user: user || undefined }, 'LOGIN_FAILED', 'User', user?._id, { email });
     throw AppError.unauthorized('Invalid email or password');
   }
   if (!user.isActive) throw AppError.forbidden('Your account has been deactivated. Contact the administrator.');
 
   user.lastLoginAt = new Date();
+  user.failedLogins = 0;
+  user.lockUntil = undefined;
   await user.save({ validateModifiedOnly: true });
   const tokens = await issueTokens(user);
   req.user = user;
   await audit(req, 'LOGIN', 'User', user._id);
-  ok(res, { user, profile: await profileOf(user), ...tokens }, 'Logged in');
+  sendTokens(req, res, tokens, { user, profile: await profileOf(user) }, 'Logged in');
 });
 
 // Self sign-up: always creates a student-role account (never admin/faculty). If an admin already added a
@@ -69,11 +95,12 @@ export const register = asyncHandler(async (req, res) => {
   await audit(req, 'REGISTER', 'User', user._id);
   const tokens = await issueTokens(user);
   res.status(201);
-  ok(res, { user, profile: await profileOf(user), ...tokens }, 'Account created');
+  sendTokens(req, res, tokens, { user, profile: await profileOf(user) }, 'Account created');
 });
 
 export const refresh = asyncHandler(async (req, res) => {
-  const { refreshToken } = req.body;
+  const refreshToken = req.body?.refreshToken || readCookie(req, REFRESH_COOKIE);
+  if (!refreshToken) throw AppError.unauthorized('Session expired. Please log in again.');
   let payload;
   try {
     payload = jwt.verify(refreshToken, env.jwtRefreshSecret);
@@ -90,11 +117,12 @@ export const refresh = asyncHandler(async (req, res) => {
   // rotate: drop the used token
   user.refreshTokens = user.refreshTokens.filter((t) => t.tokenHash !== hash);
   await user.save();
-  ok(res, await issueTokens(user), 'Token refreshed');
+  sendTokens(req, res, await issueTokens(user), {}, 'Token refreshed');
 });
 
 export const logout = asyncHandler(async (req, res) => {
-  const { refreshToken } = req.body || {};
+  const refreshToken = req.body?.refreshToken || readCookie(req, REFRESH_COOKIE);
+  clearRefreshCookie(res);
   if (refreshToken) {
     const user = await User.findById(req.user._id).select('+refreshTokens');
     user.refreshTokens = user.refreshTokens.filter((t) => t.tokenHash !== sha256(refreshToken));
@@ -119,7 +147,7 @@ export const changePassword = asyncHandler(async (req, res) => {
   await user.save();
   req.user = user;
   await audit(req, 'PASSWORD_CHANGED', 'User', user._id);
-  ok(res, await issueTokens(user), 'Password changed');
+  sendTokens(req, res, await issueTokens(user), {}, 'Password changed');
 });
 
 export const forgotPassword = asyncHandler(async (req, res) => {

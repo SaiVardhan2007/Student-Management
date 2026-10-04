@@ -92,7 +92,7 @@ All technologies below are listed in the project's `package.json` files or are u
 | Frontend framework | React 18 (`react`, `react-dom`) | Single-page user interface |
 | Frontend build tool | Vite 5 with `@vitejs/plugin-react` | Development server, hot reload and production build |
 | Routing | React Router 6 (`react-router-dom`) | Client-side routing and role-protected routes |
-| HTTP client | Axios | API calls, bearer token header, automatic token refresh |
+| HTTP client | Axios | API calls, in-memory bearer token, silent session refresh through an httpOnly cookie |
 | Charts | Recharts | Dashboard charts (line and bar) |
 | Notifications (UI) | react-hot-toast | Toast messages |
 | Styling | Plain CSS (`client/src/styles/index.css`) | Custom design system; no CSS framework |
@@ -109,9 +109,11 @@ All technologies below are listed in the project's `package.json` files or are u
 | PDF generation | PDFKit | PDF reports |
 | CSV parsing | `csv-parse` | Bulk student import |
 | Configuration | dotenv | Environment variables |
-| Dev tooling (server) | nodemon, cross-env | Auto-restart in development; cross-platform env variables |
+| Dev tooling (server) | `node --watch`, cross-env, ESLint, Prettier | Auto-restart in development; cross-platform env variables; linting and formatting for the whole repository |
 | Server tests | Jest, Supertest, mongodb-memory-server | API integration tests |
-| Client tests | Vitest, Testing Library (`react`, `jest-dom`, `user-event`), jsdom | Component and utility tests |
+| Client tests | Vitest, Testing Library (`react`, `jest-dom`, `user-event`), jsdom | Component, API-client, auth-flow and utility tests |
+| End-to-end tests | Playwright, axe-core | Real-browser tests of the production build, including WCAG 2.1 A/AA accessibility scans |
+| Deployment | Docker, Docker Compose, GitHub Actions | Container image, one-command stack with MongoDB, continuous integration |
 
 ## 6. System Architecture
 
@@ -170,7 +172,7 @@ Each module below exists in the code (backend routes and a matching frontend pag
 
 ### 8.1 Authentication and Account Management
 - Login, logout, current-user lookup (`/auth/me`), token refresh, change password, forgot password and reset password.
-- Short-lived access token (default 15 minutes) and refresh token (default 7 days). Refresh tokens are stored hashed in the database, rotate on use, and at most 5 concurrent sessions are kept per user.
+- Short-lived access token (default 15 minutes) and refresh token (default 7 days). Refresh tokens are stored hashed in the database, rotate on use, and at most 5 concurrent sessions are kept per user. The browser app receives its refresh token as an `httpOnly`, `SameSite=Strict` cookie scoped to `/api/auth` (never readable by JavaScript); other API clients may receive it in the JSON body instead.
 - Changing or resetting a password invalidates tokens issued earlier.
 - Administrators can create, edit, activate and deactivate user accounts and reset passwords (`/users`). Deactivated users are rejected on every request.
 - New accounts created by an administrator receive a random temporary password and are flagged `mustChangePassword`.
@@ -280,7 +282,7 @@ The database is MongoDB, accessed through Mongoose. Models are defined in `serve
 
 | Model | Key fields | Notes |
 |---|---|---|
-| `User` | name, email (unique), password (hashed, not selected by default), role, isActive, mustChangePassword, children, refreshTokens, reset token fields | Linked to Student/Faculty; `children` is used by parent accounts |
+| `User` | name, email (unique), password (hashed, not selected by default), role, isActive, mustChangePassword, children, refreshTokens, reset token fields, failedLogins and lockUntil (account lockout) | Linked to Student/Faculty; `children` is used by parent accounts |
 | `Student` | studentId (unique), names, email (unique), department, program, semester, section, status, guardian | Indexes on name, and on department/program/semester/section |
 | `Faculty` | employeeId (unique), names, email (unique), department, designation, status | |
 | `Department` | name, code (both unique), head, isActive | |
@@ -416,7 +418,7 @@ The client is a single-page application in `client/src/`.
 - **Layout.** `layouts/AppLayout.jsx` provides the sidebar (built from `routes/nav.js` and filtered by role), the top bar with breadcrumbs and a notifications indicator, and the page outlet.
 - **Pages (`pages/`).** Login, ForgotPassword, ResetPassword, Dashboard, Profile, Students, StudentDetail, Faculty, Users, AcademicSetup, Subjects, Timetable, Attendance, Marks, Results, Exams, Assignments, AssignmentDetail, Materials, Notices, Notifications, Calendar, Documents, Complaints, Achievements, Fees, Placements, Library, Reports, Import, AuditLogs, Settings and NotFound.
 - **Reusable components (`components/`).** `DataTable` (sorting, pagination, empty and error states), `DynamicForm` (field-driven forms with client-side validation and mapping of API errors onto fields), `ResourcePage` (generic list + create/edit/delete page used by simple resources), `ui.jsx` (buttons, cards, badges, modals, progress bars, stat cards, skeleton loaders), `Confirm` (promise-based confirmation dialog), `ErrorBoundary`, `FileLink` and `Icon`.
-- **API layer (`api/client.js`).** An Axios instance with base URL `/api` (or `VITE_API_URL` + `/api`). It adds the bearer token to each request and, on a 401 response, requests a new token pair once and retries the original request. If refresh fails, it clears the tokens and signs the user out. Helpers handle error messages, field errors, list responses, protected file downloads and blob-based image loading.
+- **API layer (`api/client.js`).** An Axios instance with base URL `/api` (or `VITE_API_URL` + `/api`). It adds the bearer token to each request and, on a 401 response, uses the httpOnly refresh cookie to obtain a new access token once and retries the original request. The access token is held in memory only (never in `localStorage`); a page reload restores the session through the cookie. If refresh fails, the user is signed out. Helpers handle error messages, field errors, list responses, protected file downloads and blob-based image loading.
 - **State.** Authentication and settings state are held in React Context. Data fetching uses custom hooks (`useFetch`, `useListQuery`, `useDebounce`, `useToggle`, `useDismiss`) in `hooks/index.js`.
 - **Validation.** `utils/validation.js` mirrors the server's password policy and file-type and size limits so users get immediate feedback.
 - **Styling.** A single stylesheet (`styles/index.css`) with a custom design system, written to be responsive across desktop, tablet and mobile widths.
@@ -429,17 +431,17 @@ Measures below are present in the source code.
 |---|---|
 | Password storage | bcrypt hashing (cost 10); the password field is excluded from queries and JSON output by default |
 | Password policy | Minimum 8 characters, with at least one lowercase letter, one uppercase letter and one digit (Zod on the server, mirrored in the client) |
-| Tokens | Signed JWT access token (default 15 min); refresh token (default 7 days) stored only as a SHA-256 hash, rotated on use, revoked on logout, password change and deactivation; password change invalidates earlier access tokens |
-| Login hardening | Same error message for wrong password and unknown email; a dummy hash comparison reduces timing differences; failed logins are audited |
-| Rate limiting | Auth endpoints: 20 requests per 15 minutes per client. Other API endpoints: 1,000 requests per 15 minutes |
+| Tokens | Signed JWT access token (default 15 min) kept in browser memory only; refresh token (default 7 days) delivered as an httpOnly, SameSite=Strict, path-scoped cookie (`Secure` when `COOKIE_SECURE=true`), stored in the database only as a SHA-256 hash, rotated on use, revoked on logout, password change and deactivation; password change invalidates earlier access tokens |
+| Login hardening | Same error message for wrong password and unknown email; a dummy hash comparison reduces timing differences; failed logins are audited; after 5 consecutive failures an account is locked for 15 minutes (HTTP 429, configurable) |
+| Rate limiting | Auth endpoints: 20 requests per 15 minutes per client. Other API endpoints: 1,000 requests per 15 minutes (both configurable with `AUTH_RATE_LIMIT` / `API_RATE_LIMIT`) |
 | Authorization | Role check on every route plus ownership scoping in the data layer |
 | Input validation | Zod schemas on request bodies, queries and parameters |
-| NoSQL injection | A sanitizer strips keys beginning with `$` or containing `.` from body, query and params |
-| HTTP hardening | Helmet headers and Content-Security-Policy, `x-powered-by` disabled, single-origin CORS (`CLIENT_URL`), 1 MB request body limit |
+| NoSQL injection | Requests whose body, query or params contain a key beginning with `$` or containing `.` are rejected with HTTP 400 (loud failure instead of silent stripping), in addition to Zod validation of every input |
+| HTTP hardening | Helmet headers and Content-Security-Policy, `x-powered-by` disabled, CORS allow-list (`CLIENT_URL` plus optional `CORS_ORIGINS`), 1 MB request body limit, gzip compression, per-request `X-Request-Id` for log correlation |
 | File uploads | Extension allow-list, MIME check, file-signature (magic number) check, random file names, 10 MB default size limit, at most 5 files per request, files stored outside the static web root and served only through the authenticated `/api/files` route with per-owner checks for sensitive categories |
 | CSV export | Formula injection neutralized |
 | Audit | Security-relevant actions are logged, and sensitive keys are redacted from audit details |
-| Production guard | The server refuses to start in production with missing, placeholder or short (<32 characters) JWT secrets, and the seed script refuses to run in production |
+| Production guard | The server refuses to start in production with missing, placeholder or short (<32 characters) JWT secrets, and the seed script refuses to run in production unless `ALLOW_DEMO_SEED=true` is set for a demo deployment |
 
 ## 14. Configuration
 
@@ -459,8 +461,15 @@ Measures below are present in the source code.
 | `MAX_FILE_SIZE_MB` | Maximum upload size | `10` |
 | `SERVE_CLIENT` | `true` makes Express serve `client/dist` | `false` |
 | `SEED_PASSWORD` | Password for seeded demo accounts | `ChangeMe@123` |
+| `COOKIE_SECURE` | Mark the refresh cookie `Secure` (set `true` behind HTTPS) | `false` |
+| `TRUST_PROXY` | Number of reverse proxies in front of the app (or `true`/`false`) | `1` |
+| `CORS_ORIGINS` | Extra allowed browser origins, comma separated | none |
+| `AUTH_RATE_LIMIT`, `API_RATE_LIMIT` | Requests per 15 minutes for auth / all API routes | `20`, `1000` |
+| `LOCKOUT_MAX_ATTEMPTS`, `LOCKOUT_MINUTES` | Failed-login lockout policy | `5`, `15` |
+| `ALLOW_DEMO_SEED` | Allow `npm run seed` when `NODE_ENV=production` (demo servers only) | `false` |
+| `LOG_FORMAT`, `LOG_TO_FILE` | `json` structured logs (default in production); also write `logs/error.log` | `text` (dev), `false` |
 
-`MONGODB_URI` accepts either a local MongoDB address or a MongoDB Atlas (`mongodb+srv://`) connection string. When Atlas is used, the connecting machine's IP address must be allowed in the Atlas Network Access list, or the server cannot start.
+`MONGODB_URI` points at a MongoDB server. The project is designed to run entirely on your own machine or server: with Docker Compose, MongoDB runs in a container on a local volume and is not published to the network.
 
 The `.env` file is excluded from version control (`.gitignore`) and must never be committed or shared, because it contains database credentials and signing secrets.
 
@@ -481,7 +490,7 @@ The `.env` file is excluded from version control (`.gitignore`) and must never b
 
 ## 15. Installation and Running the Project
 
-**Prerequisites:** Node.js 18 or newer, npm, and either a local MongoDB server or a MongoDB Atlas cluster.
+**Prerequisites:** Node.js 20.19 or newer and npm, plus a local MongoDB server (or Docker, which provides MongoDB for you). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the Docker route.
 
 ```bash
 # 1. Install dependencies for server and client
@@ -501,7 +510,7 @@ npm run dev:server    # http://localhost:5000
 npm run dev:client    # http://localhost:5173
 ```
 
-The root `package.json` scripts are: `install:all`, `dev:server`, `dev:client`, `seed`, `seed:reset`, `test`, `build` and `start`.
+The root `package.json` scripts are: `install:all`, `dev:server`, `dev:client`, `seed`, `seed:reset`, `create-admin`, `lint`, `format:check`, `test`, `test:coverage`, `test:e2e`, `build`, `smoke`, `audit`, `check` and `start`.
 
 **Demo data (`npm run seed`)** creates the institution settings, 30 students, 5 faculty members, 7 subjects, attendance records, marks, and one administrator and one parent account, along with the related academic structure. Every seeded account uses the password in `SEED_PASSWORD`.
 
@@ -530,46 +539,64 @@ npm start             # API and client together on http://localhost:5000
 |---|---|---|
 | Server | Jest with Supertest (integration tests against the Express app and a MongoDB test database; `mongodb-memory-server` is available as an in-memory fallback) | `npm --prefix server test` |
 | Client | Vitest with Testing Library and jsdom | `npm --prefix client test` |
-| Both | | `npm test` |
+| End-to-end | Playwright + axe-core against the production build (Express serving `client/dist`, in-memory MongoDB, demo data) | `npm run test:e2e` |
+| Production smoke | Boots the real `server.js` in production mode and checks readiness, caching, compression, headers and shutdown | `npm run smoke` |
+| All unit/integration | | `npm test` |
 
 The server tests use a separate test database (`MONGODB_URI_TEST`) and a temporary upload folder, so they do not touch development data in the normal configuration.
 
 ### 16.2 Test files present
 
-**Server (`server/tests/`)**: 64 `test(...)` blocks across four files plus shared helpers.
+**Server (`server/tests/`)**: 103 tests across six files plus shared helpers (`npm run test:coverage` reports coverage).
 
 | File | Areas covered |
 |---|---|
 | `auth.test.js` (11) | Login, password hashing, uniform error messages, payload validation, NoSQL injection, token requirement, `/me`, refresh rotation and logout, change password, account deactivation, forgot/reset password |
 | `students-rbac.test.js` (14) | Role-based access control (401/403 behaviour, student/parent/faculty scoping), student creation with account, duplicate and validation checks, list search/filter/sort/pagination, updates, self-service edits, soft delete, audit logs not containing passwords |
 | `attendance-marks.test.js` (14) | Class roster, marking permissions, duplicate prevention, invalid input, percentage and threshold calculation, correction workflow, mark entry permissions and validation, grades/SGPA/CGPA, grade-scale configuration, class performance |
+| `hardening.test.js` (16) | Refresh-token cookie transport (httpOnly, rotation, reuse rejection, logout), account lockout, strict input sanitising, health/readiness, request ids, security headers, create-admin script |
+| `admin-modules.test.js` (17) | User administration (create/deactivate/reset, self-protection), faculty CRUD/export/subject assignment, settings and logo upload, audience-scoped calendar, audit-log filters, study-material access control |
 | `modules.test.js` (25) | Academic structure rules, timetable and exam conflicts, seating, assignments and uploads, submissions and evaluation, deadline reminder job, protected file access, notices targeting and visibility, notifications, documents, complaints, achievements, bulk import, fees, library, placements, reports (JSON/CSV/PDF), dashboards, audit trail |
 
-**Client (`client/src/__tests__/`)**: 16 `it(...)` blocks across three files.
+**Client (`client/src/__tests__/`)**: 55 tests across eight files (`npm --prefix client run test:coverage`).
 
 | File | Areas covered |
 |---|---|
 | `Components.test.jsx` (8) | `DataTable`, pagination, UI primitives (badge, progress bar, empty/error states, modal) and the confirmation dialog |
 | `DynamicForm.test.jsx` (3) | Required-field and format validation, submission of nested values, mapping of API errors onto fields |
 | `validation.test.js` (5) | Password policy, file validation, format helpers, field validation |
+| `format.test.js` (6) | Date, money, name and dotted-path helpers |
+| `apiClient.test.js` (8) | In-memory token store, error-message mapping, request pipeline (credentials, bearer header) |
+| `hooks.test.jsx` (10) | `useFetch` (errors, retry, stale responses), `useListQuery`, `useDebounce`, `useDismiss`, `useToggle` |
+| `pages.test.jsx` (10) | Registration and forgot-password flows, session restore through the refresh cookie, error boundary, file links |
+| `auth.test.jsx` (4) | Route guards, login validation, server error display, tokens kept out of web storage |
 
-### 16.3 Build and lint
+**End-to-end (`e2e/tests/`)**: authentication and session restore, lockout, role guards, every sidebar page for each of the four roles (no console errors, no 5xx), WCAG 2.1 A/AA axe scans of the main pages for each role, and mobile layout checks.
+
+### 16.3 Build, lint and CI
 
 - A production client build is available with `npm run build` (Vite).
-- **No lint script or linter configuration is defined** in the project's `package.json` files.
-- The counts above are the number of test blocks defined in the source files. They are not a record of a particular test run.
+- `npm run lint` (ESLint) and `npm run format:check` (Prettier) cover the whole repository.
+- `npm run check` runs lint, format check, all tests, the build and the production smoke test.
+- `.github/workflows/ci.yml` runs lint, server and client tests with coverage, a dependency audit, the end-to-end suite and a Docker image build with a smoke test on every push and pull request.
 
 ## 17. Project Structure
 
 ```text
 student_mng_sys/
-├── PROJECT DOC.md            This document
 ├── README.md                 Setup guide and feature summary
 ├── PROJECT_PLAN.md           Original architecture and design notes
-├── package.json              Root scripts (install:all, dev:server, dev:client, seed, test, build, start)
-├── .gitignore
+├── CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE
+├── package.json              Root scripts (lint, format, test, build, smoke, check, ...)
+├── eslint.config.js, .prettierrc.json, .editorconfig
+├── Dockerfile, docker-compose.yml, .env.example, .dockerignore
+├── .github/                  CI workflow and Dependabot configuration
+├── scripts/                  smoke-prod.mjs, backup.sh, restore.sh
+├── e2e/                      Playwright end-to-end and accessibility tests
 ├── docs/
-│   └── API.md                Endpoint reference
+│   ├── API.md                Endpoint reference
+│   ├── DEPLOYMENT.md         Deployment, backup and operations guide
+│   └── PROJECT_DOCUMENTATION.md  This document
 ├── client/                   React front end
 │   ├── index.html
 │   ├── vite.config.js        Dev server (port 5173), /api proxy, Vitest config
@@ -577,7 +604,7 @@ student_mng_sys/
 │   └── src/
 │       ├── main.jsx          Entry point and providers
 │       ├── App.jsx           Routes and route guards
-│       ├── api/client.js     Axios instance, token refresh, file helpers
+│       ├── api/client.js     Axios instance, in-memory token, cookie-based refresh, file helpers
 │       ├── components/       DataTable, DynamicForm, ResourcePage, ui, Confirm, ErrorBoundary, FileLink, Icon
 │       ├── context/          AuthContext, SettingsContext
 │       ├── hooks/            Data-fetching and UI hooks
@@ -596,6 +623,7 @@ student_mng_sys/
         ├── server.js         Entry point
         ├── app.js            Express app
         ├── seed.js           Demo data
+        ├── scripts/          create-admin.js (first administrator, production-safe)
         ├── config/           env.js, db.js
         ├── controllers/      Request handlers
         ├── middleware/       auth, security, validate, upload, error
@@ -605,7 +633,7 @@ student_mng_sys/
         ├── validators/       Zod schemas
         ├── jobs/             Background jobs
         ├── utils/            Helpers and logger
-        └── logs/             error.log
+        └── logs/             error.log (development only)
 ```
 
 ## 18. Current Limitations
@@ -615,11 +643,9 @@ These points describe the project as it currently exists.
 - **No email delivery.** Password-reset links are printed to the server console (and returned in the response in development). There is no mail server integration.
 - **Fee payments are simulated.** No payment gateway is integrated. The payment methods are recorded values and the default method is `simulated`.
 - **Notifications are in-app only.** There are no email, SMS or push notifications.
-- **Token storage.** Access and refresh tokens are kept in the browser's `localStorage`, a common trade-off for single-page apps. HttpOnly cookies would be stronger for internet-facing deployment.
-- **Local file storage.** Uploads are stored on the server's disk, not in object storage, and are not replicated or backed up by the application.
-- **No linting or CI configuration** is included. No Docker configuration is included.
-- **Test coverage.** Automated tests cover the API broadly but the front end has only component and utility tests (16), and there are no browser end-to-end tests.
-- **Local-oriented deployment.** The project is documented and configured for local or single-server use. Public deployment would need HTTPS through a reverse proxy, production secrets and regular backups.
+- **Local file storage.** Uploads are stored on the server's disk (a Docker volume in the container setup), not in object storage. The application does not replicate them; use `scripts/backup.sh` for backups.
+- **HTTPS is delegated to a reverse proxy.** The app speaks plain HTTP; for any non-local deployment put it behind a TLS-terminating proxy and set `COOKIE_SECURE=true`.
+- **No real-time updates.** Notifications are fetched, not pushed (no WebSocket layer).
 - **Single-institution design.** Settings are a single record, so the system serves one institution.
 
 ## 19. Possible Future Enhancements
@@ -628,9 +654,8 @@ These are suggestions and are **not** implemented.
 
 - Email delivery for password reset and notifications.
 - A real payment gateway for fee collection.
-- HttpOnly-cookie token storage and HTTPS deployment.
-- A linter and a continuous-integration pipeline, plus end-to-end browser tests.
-- Containerization (Docker) for easier deployment.
+- Email/SMS notification channels and a WebSocket push layer.
+- Multi-institution (multi-tenant) support.
 - Cloud or object storage for uploaded files.
 
 ## 20. Conclusion

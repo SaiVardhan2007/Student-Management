@@ -11,9 +11,16 @@ const markSchema = z.object({
   subject: objectId,
   section: objectId,
   date: dateField,
-  records: z.array(z.object({ student: objectId, status: z.enum(ATTENDANCE_STATUSES), remarks: z.string().trim().max(300).optional() })).min(1, 'Select at least one student').max(500),
+  records: z
+    .array(z.object({ student: objectId, status: z.enum(ATTENDANCE_STATUSES), remarks: z.string().trim().max(300).optional() }))
+    .min(1, 'Select at least one student')
+    .max(500),
 });
-const requestSchema = z.object({ attendance: objectId, requestedStatus: z.enum(ATTENDANCE_STATUSES), reason: z.string().trim().min(5, 'Please explain the reason (min 5 characters)').max(500) });
+const requestSchema = z.object({
+  attendance: objectId,
+  requestedStatus: z.enum(ATTENDANCE_STATUSES),
+  reason: z.string().trim().min(5, 'Please explain the reason (min 5 characters)').max(500),
+});
 const reviewSchema = z.object({ status: z.enum(['approved', 'rejected']), reviewNote: z.string().trim().max(500).optional() });
 
 const staff = authorize('admin', 'faculty');

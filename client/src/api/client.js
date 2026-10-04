@@ -1,24 +1,62 @@
 import axios from 'axios';
 
-const TOKEN_KEY = 'sms.accessToken';
-const REFRESH_KEY = 'sms.refreshToken';
+const SESSION_FLAG = 'sms.session';
+
+/**
+ * The access token lives in memory only (never in web storage, so XSS cannot read it from disk).
+ * The long-lived refresh token is an httpOnly cookie managed by the server; `sms.session` is just a
+ * non-secret hint that tells the app whether to try restoring a session on page load.
+ */
+let accessToken = null;
+const safeStorage = {
+  get: () => {
+    try {
+      return localStorage.getItem(SESSION_FLAG);
+    } catch {
+      return null;
+    }
+  },
+  set: () => {
+    try {
+      localStorage.setItem(SESSION_FLAG, '1');
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  del: () => {
+    try {
+      localStorage.removeItem(SESSION_FLAG);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
 
 export const tokenStore = {
-  get access() { return localStorage.getItem(TOKEN_KEY); },
-  get refresh() { return localStorage.getItem(REFRESH_KEY); },
-  set({ accessToken, refreshToken }) {
-    if (accessToken) localStorage.setItem(TOKEN_KEY, accessToken);
-    if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
+  get access() {
+    return accessToken;
+  },
+  get hasSession() {
+    return !!safeStorage.get();
+  },
+  set({ accessToken: token }) {
+    if (token) accessToken = token;
+    safeStorage.set();
   },
   clear() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_KEY);
+    accessToken = null;
+    safeStorage.del();
   },
 };
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api';
 
-export const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
+export const api = axios.create({
+  baseURL: API_BASE,
+  timeout: 30000,
+  withCredentials: true,
+  headers: { 'X-Token-Transport': 'cookie' },
+});
 
 api.interceptors.request.use((config) => {
   const t = tokenStore.access;
@@ -28,12 +66,14 @@ api.interceptors.request.use((config) => {
 
 let refreshing = null;
 let onSessionExpired = () => {};
-export const setSessionExpiredHandler = (fn) => { onSessionExpired = fn; };
+export const setSessionExpiredHandler = (fn) => {
+  onSessionExpired = fn;
+};
 
-async function refreshTokens() {
-  const refreshToken = tokenStore.refresh;
-  if (!refreshToken) throw new Error('no refresh token');
-  const res = await axios.post(`${API_BASE}/auth/refresh`, { refreshToken });
+/** Exchange the refresh cookie for a new access token. */
+export async function refreshTokens() {
+  // '/auth/*' calls are never retried by the interceptor below, so this cannot loop
+  const res = await api.post('/auth/refresh', {});
   tokenStore.set(res.data.data);
   return res.data.data.accessToken;
 }
@@ -43,10 +83,14 @@ api.interceptors.response.use(
   async (error) => {
     const original = error.config;
     const isAuthCall = original?.url?.startsWith('/auth/');
-    if (error.response?.status === 401 && original && !original._retry && !isAuthCall && tokenStore.refresh) {
+    if (error.response?.status === 401 && original && !original._retry && !isAuthCall && tokenStore.hasSession) {
       original._retry = true;
       try {
-        refreshing = refreshing || refreshTokens().finally(() => { refreshing = null; });
+        refreshing =
+          refreshing ||
+          refreshTokens().finally(() => {
+            refreshing = null;
+          });
         const token = await refreshing;
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);

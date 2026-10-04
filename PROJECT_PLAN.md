@@ -10,7 +10,7 @@ Uploads live in `server/uploads/`; MongoDB stores metadata + relative path.
 Browser (React SPA, Vite :5173)  --HTTP/JSON (Axios, Bearer JWT)-->  Express API (:5000)  --Mongoose-->  MongoDB (localhost:27017)
                                                                      └── server/uploads (multer, local disk)
 ```
-- Stateless API, short-lived access JWT (15 min) + refresh JWT (7 d, stored hashed in DB, rotated, httpOnly-less body/localStorage for simplicity locally; refresh tokens revocable on logout).
+- Stateless API, short-lived access JWT (15 min, held in browser memory only) + refresh JWT (7 d, stored hashed in DB, rotated, delivered as an httpOnly SameSite=Strict cookie; revocable on logout). Account lockout after repeated failures.
 - Layers: `routes → middleware(auth, rbac, validate) → controllers → services/models`.
 - Central error handler (`AppError`, Mongoose/Zod/Multer mapping), consistent envelope:
   `{ success, message, data, meta? }` / `{ success:false, message, errors? }`.
@@ -77,6 +77,6 @@ admin, faculty, student and parent roles on desktop and mobile widths against a 
 
 Deviations from the original plan:
 * Password-reset e-mail is not sent (no mail server by design); the link is logged to the API console and shown in development.
-* Refresh/access tokens are kept in `localStorage` (documented trade-off) rather than httpOnly cookies.
+* Originally tokens lived in `localStorage`; v1.1 moved the refresh token to an httpOnly cookie and the access token to memory (see CHANGELOG).
 * Fee payments are simulated; there is no payment gateway.
 * Tests use the local MongoDB test database and fall back to an in-memory server if none is running.
