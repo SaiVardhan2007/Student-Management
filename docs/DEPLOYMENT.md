@@ -16,7 +16,7 @@ Edit `.env`:
 | Setting | What to do |
 |---|---|
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | **Required.** Two different random strings, 32+ characters. Generate each with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
-| `CLIENT_URL` | The address people type into the browser, e.g. `https://sms.mycollege.edu` (used for CORS and password-reset links) |
+| `APP_URL` | The address people type into the browser, e.g. `https://sms.mycollege.edu` (used for password-reset links) |
 | `COOKIE_SECURE` | Set `true` once the site is served over HTTPS |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | The first administrator (password must meet the policy: 8+ chars, upper, lower, digit) |
 
@@ -27,7 +27,7 @@ docker compose up -d --build
 docker compose run --rm tools          # creates the admin from ADMIN_* (idempotent)
 ```
 
-Open `http://localhost:5000` (or your `APP_PORT`) and sign in. The first thing to do is **Settings → college name/logo**, then
+Open `http://localhost:3000` (or your `APP_PORT`) and sign in. The first thing to do is **Settings → college name/logo**, then
 **Academic Setup** (departments, programs, years, semesters, sections) and create users or use **Bulk Import**.
 
 ### What you get
@@ -56,11 +56,11 @@ The app speaks plain HTTP on its port; terminate TLS in front of it. Any reverse
 
 ```caddyfile
 sms.mycollege.edu {
-    reverse_proxy app:5000
+    reverse_proxy app:3000
 }
 ```
 
-Then in `.env` set `CLIENT_URL=https://sms.mycollege.edu`, `COOKIE_SECURE=true`, and `TRUST_PROXY=1` (one proxy hop), and
+Then in `.env` set `APP_URL=https://sms.mycollege.edu`, `COOKIE_SECURE=true`, and `TRUST_PROXY=1` (one proxy hop), and
 `docker compose up -d`. Without `COOKIE_SECURE=true` browsers on HTTPS still work, but the refresh cookie lacks the `Secure` flag.
 
 ## 3. Backups and restore
@@ -86,7 +86,7 @@ Roll back by checking out the previous version and running the same command. Tak
 | Task | Command |
 |---|---|
 | Logs (structured JSON, one line per event; request lines carry an `X-Request-Id`) | `docker compose logs -f app` |
-| Status / health | `docker compose ps` · `curl localhost:5000/api/ready` |
+| Status / health | `docker compose ps` · `curl localhost:3000/api/ready` |
 | Restart | `docker compose restart app` |
 | Stop (graceful: finishes in-flight requests, closes MongoDB) | `docker compose down` (add `-v` **only** to delete all data) |
 | Reset a forgotten admin password | Use **Forgot password**; there is no email server, so the link is written to the app log: `docker compose logs app \| grep "PASSWORD RESET"` |
@@ -94,7 +94,7 @@ Roll back by checking out the previous version and running the same command. Tak
 ### Password-reset links
 
 No email service is configured by design. A reset request prints its link (valid 30 minutes) to the application log, which an
-administrator can read and pass to the user. Wire up SMTP in `server/src/controllers/auth.controller.js` if you later want email.
+administrator can read and pass to the user. Wire up SMTP in `services/auth.service.ts` if you later want email.
 
 ### Tuning
 
@@ -106,23 +106,23 @@ All knobs are environment variables (see the README table): token lifetimes, upl
 Requirements: Node.js 20.19+, MongoDB 6+ running locally.
 
 ```bash
-npm run install:all
+npm install
+cp .env.example .env.local
+# edit .env.local: strong JWT secrets, APP_URL=http://<host>:3000, MONGODB_URI
 npm run build
-cp server/.env.example server/.env
-# edit server/.env: NODE_ENV=production, SERVE_CLIENT=true, strong JWT secrets, CLIENT_URL=http://<host>:5000
 ADMIN_EMAIL=you@college.edu ADMIN_PASSWORD='Str0ng!Passw0rd' npm run create-admin
-npm start
+NODE_ENV=production npm start   # http://localhost:3000
 ```
 
 Run it under a process manager (systemd, PM2, or a Windows service wrapper) so it restarts on boot, and back up MongoDB with
-`mongodump --db student_management` plus the `server/uploads/` folder.
+`mongodump --db student_management` plus the `uploads/` folder.
 
 ## 7. Pre-launch checklist
 
 - [ ] Two distinct, random JWT secrets set (the server refuses to start in production otherwise)
-- [ ] `CLIENT_URL` equals the public address; `COOKIE_SECURE=true` behind HTTPS
+- [ ] `APP_URL` equals the public address; `COOKIE_SECURE=true` behind HTTPS
 - [ ] `ALLOW_DEMO_SEED=false`; no demo accounts exist
-- [ ] First administrator created with a strong password; the `ADMIN_PASSWORD` line removed from `.env`
+- [ ] First administrator created with a strong password; the `ADMIN_PASSWORD` line removed from `.env.local`
 - [ ] MongoDB is **not** reachable from outside the host/network
 - [ ] A backup was taken **and** restored successfully on a test machine
-- [ ] `npm run check` and `npm run test:e2e` pass on the version you deploy
+- [ ] `npm run lint`, `npm test` and `npm run build` pass on the version you deploy

@@ -4,10 +4,14 @@
 
 | | |
 |---|---|
-| Project type | Full-stack web application (MERN stack) |
-| Package name | `student-management-system` (v1.0.0) |
-| Components | `client/` (React single-page app), `server/` (Node.js / Express REST API) |
-| Database | MongoDB, accessed through Mongoose |
+| Project type | Full-stack web application (Next.js App Router + MongoDB) |
+| Package name | `student-management-system` (v2.0.0) |
+| Frontend | Next.js / React (TypeScript) |
+| Backend | Next.js server-side architecture: Route Handlers (`app/api`) + a service layer |
+| Database | MongoDB, accessed through Mongoose (ODM) |
+
+> Migrated from a MERN codebase (React + Express). Features, roles, permissions, data model and API URLs are unchanged;
+> see `MIGRATION_PLAN.md` and `FEATURE_PARITY.md`.
 
 ---
 
@@ -38,7 +42,7 @@
 
 ## 1. Project Overview
 
-The Student Management System (SMS) is a web application that manages the academic records and day-to-day activities of a college in one place. It is built on the MERN stack: MongoDB, Express.js, React and Node.js.
+The Student Management System (SMS) is a web application that manages the academic records and day-to-day activities of a college in one place. It is built with Next.js (React UI, Route Handlers and a service layer) on a local MongoDB database via Mongoose.
 
 The system has four kinds of users: **administrators, faculty, students and parents**. Each user signs in with an account and sees only the screens and data that belong to their role. Administrators configure the institution and manage people. Faculty record attendance and marks and run assignments. Students view their own academic information and submit work. Parents view the records of their linked children.
 
@@ -85,69 +89,46 @@ SMS replaces these separate tools with one web application backed by one databas
 
 ## 5. Technology Stack
 
-All technologies below are listed in the project's `package.json` files or are used directly in the source.
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 16 (App Router), React 19, TypeScript |
+| UI | React components, hand-written CSS design system (`app/globals.css`), Recharts, react-hot-toast |
+| API | Next.js Route Handlers (`app/api/**/route.ts`) |
+| Business logic | Service modules (`services/*.ts`) |
+| Validation | Zod (server-side for every body/query; mirrored in forms) |
+| Database / ODM | MongoDB (local) / Mongoose 8 |
+| Authentication | JWT (jose) in httpOnly cookies, bcryptjs password hashing |
+| Files | Local disk (`uploads/`), served only through the authorised `/api/files` route |
+| Reports | pdfkit (PDF), CSV |
+| Tests | Vitest + mongodb-memory-server (route handlers called in-process) |
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| Frontend framework | React 18 (`react`, `react-dom`) | Single-page user interface |
-| Frontend build tool | Vite 5 with `@vitejs/plugin-react` | Development server, hot reload and production build |
-| Routing | React Router 6 (`react-router-dom`) | Client-side routing and role-protected routes |
-| HTTP client | Axios | API calls, in-memory bearer token, silent session refresh through an httpOnly cookie |
-| Charts | Recharts | Dashboard charts (line and bar) |
-| Notifications (UI) | react-hot-toast | Toast messages |
-| Styling | Plain CSS (`client/src/styles/index.css`) | Custom design system; no CSS framework |
-| State management | React Context (`AuthContext`, `SettingsContext`) and custom hooks | Authentication and settings state; no Redux or similar library |
-| Runtime | Node.js (ES modules) | Server runtime |
-| Web framework | Express 4 | REST API |
-| Database | MongoDB | Data storage |
-| ODM | Mongoose 8 | Schemas, models and queries |
-| Authentication | `jsonwebtoken` (JWT), `bcryptjs` | Access/refresh tokens and password hashing |
-| Validation | Zod | Request body, query and parameter validation |
-| File uploads | Multer | Multipart uploads to local disk |
-| Security middleware | Helmet, CORS, `express-rate-limit`, custom input sanitizer | Security headers, origin control, rate limiting, NoSQL operator stripping |
-| Logging | Morgan, custom file logger | HTTP request logs; errors appended to `server/src/logs/error.log` |
-| PDF generation | PDFKit | PDF reports |
-| CSV parsing | `csv-parse` | Bulk student import |
-| Configuration | dotenv | Environment variables |
-| Dev tooling (server) | `node --watch`, cross-env, ESLint, Prettier | Auto-restart in development; cross-platform env variables; linting and formatting for the whole repository |
-| Server tests | Jest, Supertest, mongodb-memory-server | API integration tests |
-| Client tests | Vitest, Testing Library (`react`, `jest-dom`, `user-event`), jsdom | Component, API-client, auth-flow and utility tests |
-| End-to-end tests | Playwright, axe-core | Real-browser tests of the production build, including WCAG 2.1 A/AA accessibility scans |
-| Deployment | Docker, Docker Compose, GitHub Actions | Container image, one-command stack with MongoDB, continuous integration |
 
 ## 6. System Architecture
 
-The application is a three-tier, client–server system. The React app runs in the browser and communicates with the Express API over HTTP using JSON. The API reads and writes MongoDB through Mongoose. Uploaded files are written to a local folder (`server/uploads/`) and served back only through an authenticated API route.
-
-```mermaid
-flowchart TD
-    A["React SPA (Vite dev server, port 5173)"] -->|"HTTP/JSON, Bearer JWT (Axios)"| B["Express REST API (port 5000)"]
-    B --> C["Middleware: Helmet, CORS, rate limit, sanitizer, auth, RBAC, Zod validation"]
-    C --> D["Controllers / route handlers"]
-    D --> E["Services (access scope, grading, attendance, enrollment, notifications, audit)"]
-    D --> F["Mongoose models"]
-    E --> F
-    F --> G[("MongoDB")]
-    D --> H[("Local disk: server/uploads/")]
-    I["Background job (hourly deadline reminders)"] --> F
+```
+Browser: React UI (client components) --fetch /api--> Route Handlers --> Services --> Mongoose --> MongoDB (localhost:27017)
+         Server Components / layouts (read the session cookie)                                   uploads/ (local disk)
 ```
 
-**Request flow on the API:**
+- `proxy.ts` (Next middleware) gates **pages**: anonymous visitors go to `/login`, a role without access goes to the dashboard.
+- `lib/api.ts` `route({ roles, body, query, upload }, handler)` wraps every Route Handler: rate limit, DB, authenticate,
+  authorise, parse (JSON/form/multipart), operator-injection guard, Zod validation, service, standard envelope
+  `{ success, message, data, meta? }`. Errors (AppError, Zod, Mongoose) become consistent JSON; stack traces are never sent in production.
+- Authorisation is enforced on the server in two places: the `roles` option of each route and the data-scoping helpers in
+  `services/access.ts` / `services/scope.ts`. Hiding links in the UI is never the only defence.
+- **Sessions.** Login sets two httpOnly, SameSite=Strict cookies: `sms_access` (15 min JWT) and `sms_refresh` (7-day rotating
+  token, hash stored in MongoDB, path `/api/auth`). The browser client refreshes silently on a 401. `Authorization: Bearer` is still accepted for non-browser clients.
+- A background job (`instrumentation.ts` -> `services/jobs.ts`) sends assignment-deadline reminders hourly.
 
-`Request → Helmet / CORS / body parsers → input sanitizer → rate limiter → route → protect (JWT check) → authorize (role) → validate (Zod) → controller → service / model → response`
-
-Errors thrown anywhere are handled by a single error handler (`server/src/middleware/error.js`). It maps Zod, Mongoose, Multer, duplicate-key and JSON-parse errors to a consistent response, `{ success: false, message, errors? }`. Successful responses use `{ success: true, message, data, meta? }`.
-
-**Development setup.** In development, the Vite server proxies requests beginning with `/api` to `http://localhost:5000` (configurable with `VITE_PROXY_TARGET`). In a production-style run, setting `SERVE_CLIENT=true` makes Express serve the built `client/dist` folder, so one server handles everything.
 
 ## 7. User Roles and Access Control
 
 Four roles exist: `admin`, `faculty`, `student` and `parent`. Access is enforced in two places:
 
 - **On the API.** The `protect` middleware verifies the JWT and loads the active user on every request. The `authorize(...roles)` middleware restricts each route to specific roles. Controllers and services additionally scope data by ownership: a student sees only their own records, a parent sees only linked children, and a faculty member sees only students enrolled in the subjects assigned to them.
-- **In the UI.** `App.jsx` wraps routes in a `Protected` component that redirects unauthenticated users to the login page and shows an "Access denied" page for disallowed roles. The sidebar (`client/src/routes/nav.js`) shows only the entries allowed for the current role. The UI mirrors the API rules, which remain the authoritative check.
+- **In the UI.** `proxy.ts` redirects unauthenticated visitors to the login page and the app shell shows an "Access denied" page for disallowed roles. The sidebar (`lib/nav.ts`) shows only the entries allowed for the current role. The UI mirrors the API rules, which remain the authoritative check.
 
-**Sidebar and page access by role** (taken from `client/src/routes/nav.js`):
+**Sidebar and page access by role** (taken from `lib/nav.ts` and `lib/permissions.ts`):
 
 | Page | Admin | Faculty | Student | Parent |
 |---|:-:|:-:|:-:|:-:|
@@ -276,7 +257,7 @@ Each module below exists in the code (backend routes and a matching frontend pag
 
 ## 9. Database Design
 
-The database is MongoDB, accessed through Mongoose. Models are defined in `server/src/models/` and grouped by area (`people.js`, `academic.js`, `academics-ops.js`, `campus.js`, `extras.js`).
+The database is MongoDB, accessed through Mongoose. Models are defined in `models/` and grouped by area (`people.ts`, `academic.ts`, `academics-ops.ts`, `campus.ts`, `extras.ts`).
 
 ### 9.1 Collections
 
@@ -350,34 +331,20 @@ Relationships are implemented as ObjectId references with Mongoose `ref`, and jo
 
 ## 10. Backend Design
 
-The server uses ES modules and lives in `server/src/`.
-
-| Folder / file | Purpose |
+| Path | Purpose |
 |---|---|
-| `server.js` | Entry point: connects to MongoDB, starts the HTTP server and background job, handles graceful shutdown |
-| `app.js` | Builds the Express app: Helmet, CORS, parsers, sanitizer, rate limiting, routes, optional static client, error handler |
-| `config/env.js`, `config/db.js` | Environment loading and MongoDB connection |
-| `routes/` | One router per resource; combined in `routes/index.js` under `/api` |
-| `controllers/` | Request handlers for students, faculty, users, auth, attendance, marks, assignments and files. `crud.js` is a generic controller factory used for simple resources (departments, programs, subjects, exams, timetable, calendar and so on) |
-| `middleware/` | `auth.js` (JWT and role checks), `security.js` (sanitizer and rate limiters), `validate.js` (Zod), `upload.js` (Multer and file checks), `error.js` (central error handler) |
-| `models/` | Mongoose schemas |
-| `validators/` | Zod schemas for academic, operational and people resources |
-| `services/` | Reusable logic: `access.js` and `scope.js` (data scoping by role), `attendance.js` (summaries), `grading.js` (grades, SGPA, CGPA), `enrollment.js`, `notify.js`, `audit.js`, `accounts.js` |
-| `jobs/index.js` | Hourly deadline-reminder job |
-| `utils/` | `AppError`, HTTP helpers (pagination, response envelope), CSV helper, logger |
-| `seed.js` | Demo data loader |
+| `app/api/**/route.ts` | Thin route handlers: declare roles, schemas and uploads, then call a service |
+| `services/*.service.ts` | Business logic per module (auth, student, faculty, attendance, marks, assignment, schedule, notice, fee, placement, library, report, import, dashboard, settings, files...) |
+| `services/{access,scope,accounts,attendance,audit,enrollment,grading,notify}.ts` | Shared domain helpers |
+| `services/crud.ts`, `lib/crud-routes.ts` | Generic CRUD factory used by configuration-style resources |
+| `models/*.ts` | Mongoose models (hot-reload safe via `registerModel`) |
+| `validators/*.ts` | Zod schemas |
+| `lib/` | `mongodb` (cached connection), `auth`, `api`, `permissions`, `upload`, `query`, `csv`, `security`, `rate-limit`, `env`, `seed` |
 
-**Notable behaviours:**
-
-- **Pagination and filtering.** List endpoints accept `page`, `limit`, `search`, `sort` and resource-specific filters. Sort fields are allow-listed, search text is regex-escaped, and the page size is capped.
-- **Delete protection.** The generic controller can block deletion of a record that other records still reference (for example a department that still has programs).
-- **Soft deletion.** Deleting a student or faculty member deactivates the record and the login account instead of removing data.
-- **Errors.** Stack traces are returned only outside production. In production, 500-level responses use a generic message.
-- **Graceful shutdown.** `SIGINT` and `SIGTERM` close the server and exit.
 
 ## 11. REST API Overview
 
-All endpoints are served under `/api`. Except for login, token refresh, password reset requests, public settings and the health check, they require `Authorization: Bearer <access token>`. The complete endpoint list is in [`docs/API.md`](docs/API.md). The table below summarizes the route groups registered in `server/src/routes/index.js`.
+All endpoints are served under `/api`. Except for login, token refresh, password reset requests, public settings and the health check, they require a session (httpOnly `sms_access` cookie, or `Authorization: Bearer <access token>` for API clients). The complete endpoint list is in [`docs/API.md`](docs/API.md). The table below summarizes the route groups implemented under `app/api/`.
 
 | Base path | Purpose | Main access |
 |---|---|---|
@@ -411,17 +378,13 @@ All endpoints are served under `/api`. Except for login, token refresh, password
 
 ## 12. Frontend Design
 
-The client is a single-page application in `client/src/`.
+- Pages live in `app/(auth)` (login, register, forgot/reset password) and `app/(dashboard)` (every signed-in page).
+- `app/(dashboard)/layout.tsx` is a Server Component that reads the session cookie and passes the user to `AuthProvider`, so pages
+  render signed-in on first paint; `components/layout/app-shell.tsx` provides the grouped sidebar, breadcrumbs, notification bell and user menu.
+- Navigation is defined in `lib/nav.ts` (groups: Overview, People, Academics, Attendance & Exams, Coursework, Communication, Student Services, Administration), filtered by role.
+- Shared components: `components/ui` (Button, Card, Modal, Badge, Field, Tabs, StatCard, DataTable, DynamicForm, ResourcePage, FileLink, Icon), `components/providers`.
+- `lib/api-client.ts` is the browser API client (cookie auth, single-flight silent refresh). Every list page supports server-side search, sort, filters and pagination; destructive actions use a confirmation dialog.
 
-- **Entry and providers.** `main.jsx` wraps the app in `ErrorBoundary`, `BrowserRouter`, `AuthProvider`, `SettingsProvider` and `ConfirmProvider`, and mounts the toast container.
-- **Routing.** `App.jsx` defines routes. Pages are loaded lazily (`React.lazy` with `Suspense`). `Protected` guards signed-in and role-restricted routes, and `GuestOnly` guards the login, forgot-password and reset-password pages. Unknown paths show a "not found" page.
-- **Layout.** `layouts/AppLayout.jsx` provides the sidebar (built from `routes/nav.js` and filtered by role), the top bar with breadcrumbs and a notifications indicator, and the page outlet.
-- **Pages (`pages/`).** Login, ForgotPassword, ResetPassword, Dashboard, Profile, Students, StudentDetail, Faculty, Users, AcademicSetup, Subjects, Timetable, Attendance, Marks, Results, Exams, Assignments, AssignmentDetail, Materials, Notices, Notifications, Calendar, Documents, Complaints, Achievements, Fees, Placements, Library, Reports, Import, AuditLogs, Settings and NotFound.
-- **Reusable components (`components/`).** `DataTable` (sorting, pagination, empty and error states), `DynamicForm` (field-driven forms with client-side validation and mapping of API errors onto fields), `ResourcePage` (generic list + create/edit/delete page used by simple resources), `ui.jsx` (buttons, cards, badges, modals, progress bars, stat cards, skeleton loaders), `Confirm` (promise-based confirmation dialog), `ErrorBoundary`, `FileLink` and `Icon`.
-- **API layer (`api/client.js`).** An Axios instance with base URL `/api` (or `VITE_API_URL` + `/api`). It adds the bearer token to each request and, on a 401 response, uses the httpOnly refresh cookie to obtain a new access token once and retries the original request. The access token is held in memory only (never in `localStorage`); a page reload restores the session through the cookie. If refresh fails, the user is signed out. Helpers handle error messages, field errors, list responses, protected file downloads and blob-based image loading.
-- **State.** Authentication and settings state are held in React Context. Data fetching uses custom hooks (`useFetch`, `useListQuery`, `useDebounce`, `useToggle`, `useDismiss`) in `hooks/index.js`.
-- **Validation.** `utils/validation.js` mirrors the server's password policy and file-type and size limits so users get immediate feedback.
-- **Styling.** A single stylesheet (`styles/index.css`) with a custom design system, written to be responsive across desktop, tablet and mobile widths.
 
 ## 13. Security Implementation
 
@@ -445,196 +408,63 @@ Measures below are present in the source code.
 
 ## 14. Configuration
 
-### 14.1 Server environment variables (`server/.env`, template in `server/.env.example`)
+Environment variables live in `.env.local` (template: `.env.example`; never committed).
 
-| Variable | Purpose | Default if unset |
+| Variable | Purpose | Default |
 |---|---|---|
-| `NODE_ENV` | `development`, `test` or `production` | `development` |
-| `PORT` | API port | `5000` |
-| `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/student_management` |
-| `MONGODB_URI_TEST` | Database used by the test environment | `mongodb://localhost:27017/student_management_test` |
-| `CLIENT_URL` | Allowed browser origin (CORS) and base for password-reset links | `http://localhost:5173` |
-| `JWT_SECRET`, `JWT_REFRESH_SECRET` | Token signing keys | Development-only fallbacks (not accepted in production) |
-| `JWT_ACCESS_EXPIRES` | Access token lifetime | `15m` |
-| `JWT_REFRESH_EXPIRES_DAYS` | Refresh token lifetime in days | `7` |
-| `UPLOAD_DIR` | Upload folder (relative to `server/` or absolute) | `uploads` |
-| `MAX_FILE_SIZE_MB` | Maximum upload size | `10` |
-| `SERVE_CLIENT` | `true` makes Express serve `client/dist` | `false` |
-| `SEED_PASSWORD` | Password for seeded demo accounts | `ChangeMe@123` |
-| `COOKIE_SECURE` | Mark the refresh cookie `Secure` (set `true` behind HTTPS) | `false` |
-| `TRUST_PROXY` | Number of reverse proxies in front of the app (or `true`/`false`) | `1` |
-| `CORS_ORIGINS` | Extra allowed browser origins, comma separated | none |
-| `AUTH_RATE_LIMIT`, `API_RATE_LIMIT` | Requests per 15 minutes for auth / all API routes | `20`, `1000` |
-| `LOCKOUT_MAX_ATTEMPTS`, `LOCKOUT_MINUTES` | Failed-login lockout policy | `5`, `15` |
-| `ALLOW_DEMO_SEED` | Allow `npm run seed` when `NODE_ENV=production` (demo servers only) | `false` |
-| `LOG_FORMAT`, `LOG_TO_FILE` | `json` structured logs (default in production); also write `logs/error.log` | `text` (dev), `false` |
+| `MONGODB_URI` | Local MongoDB | `mongodb://localhost:27017/student_management` |
+| `JWT_SECRET`, `JWT_REFRESH_SECRET` | Signing keys (32+ chars required in production) | dev-only fallbacks |
+| `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES_DAYS` | Token lifetimes | `15m`, `7` |
+| `APP_URL` | Public URL (used in password-reset links) | `http://localhost:3000` |
+| `NEXT_PUBLIC_APP_NAME` | Default app name before settings load | Student Management System |
+| `UPLOAD_DIR`, `MAX_FILE_SIZE_MB` | Local upload folder and size limit | `uploads`, `10` |
+| `COOKIE_SECURE`, `TRUST_PROXY` | HTTPS cookies; proxy hops for client IP | `false`, `0` |
+| `AUTH_RATE_LIMIT`, `API_RATE_LIMIT`, `LOCKOUT_MAX_ATTEMPTS`, `LOCKOUT_MINUTES` | Rate limits / lockout | `20`, `1000`, `5`, `15` |
+| `SEED_PASSWORD`, `ALLOW_DEMO_SEED` | Demo data | `ChangeMe@123`, `false` |
 
-`MONGODB_URI` points at a MongoDB server. The project is designed to run entirely on your own machine or server: with Docker Compose, MongoDB runs in a container on a local volume and is not published to the network.
+The app listens on port **3000** (`next dev` / `next start`).
 
-The `.env` file is excluded from version control (`.gitignore`) and must never be committed or shared, because it contains database credentials and signing secrets.
-
-### 14.2 Client environment variables (`client/.env`, optional)
-
-| Variable | Purpose |
-|---|---|
-| `VITE_API_URL` | API base URL. Leave empty to use the Vite development proxy |
-| `VITE_PROXY_TARGET` | Target of the development proxy (default `http://localhost:5000`) |
-
-### 14.3 Ports
-
-| Service | Port |
-|---|---|
-| React / Vite development server | 5173 |
-| Express API | 5000 |
-| MongoDB (local) | 27017 |
 
 ## 15. Installation and Running the Project
 
-**Prerequisites:** Node.js 20.19 or newer and npm, plus a local MongoDB server (or Docker, which provides MongoDB for you). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the Docker route.
-
 ```bash
-# 1. Install dependencies for server and client
-npm run install:all
-
-# 2. Create the server configuration from the template and edit it
-cp server/.env.example server/.env
-
-# 3. (Optional) load demo data
-npm run seed          # only if the database has no users
-npm run seed:reset    # wipes ALL collections, then reseeds
-
-# 4. Start the API (terminal 1)
-npm run dev:server    # http://localhost:5000
-
-# 5. Start the web app (terminal 2)
-npm run dev:client    # http://localhost:5173
+npm install
+cp .env.example .env.local      # set JWT_SECRET / JWT_REFRESH_SECRET
+npm run seed                    # optional demo data (needs MongoDB running locally)
+npm run dev                     # http://localhost:3000
 ```
 
-The root `package.json` scripts are: `install:all`, `dev:server`, `dev:client`, `seed`, `seed:reset`, `create-admin`, `lint`, `format:check`, `test`, `test:coverage`, `test:e2e`, `build`, `smoke`, `audit`, `check` and `start`.
+Production: `npm run build` then `npm start` (set `NODE_ENV=production`, strong secrets). First administrator without demo data:
+`ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run create-admin`.
 
-**Demo data (`npm run seed`)** creates the institution settings, 30 students, 5 faculty members, 7 subjects, attendance records, marks, and one administrator and one parent account, along with the related academic structure. Every seeded account uses the password in `SEED_PASSWORD`.
+Demo accounts (password = `SEED_PASSWORD`): `admin@college.local`, `meera.iyer@college.local` (faculty), `s250001@college.local` ... `s250030@college.local` (students), `parent@college.local`.
 
-| Role | Example login |
-|---|---|
-| Admin | `admin@college.local` |
-| Faculty | `meera.iyer@college.local` (also `arjun.nair`, `kavita.sharma`, `rahul.verma`, `sana.khan` at `@college.local`) |
-| Student | `s250001@college.local` to `s250030@college.local` |
-| Parent | `parent@college.local` |
-
-**Production-style run on one port:**
-
-```bash
-npm run build         # builds client/dist
-# In server/.env set NODE_ENV=production, SERVE_CLIENT=true, strong JWT secrets, CLIENT_URL=http://localhost:5000
-npm start             # API and client together on http://localhost:5000
-```
-
-**Password reset.** No email service is configured. When a user requests a password reset, the reset link is written to the server console and, in development only, returned in the API response.
 
 ## 16. Testing
 
-### 16.1 Frameworks
+- `npm test` - Vitest. 103 API integration tests (ported from the original Jest/Supertest suites) call the real Route Handlers
+  in-process against an in-memory MongoDB (`tests/support/request.ts`): auth, RBAC, students, attendance, marks, assignments,
+  timetable/exams, notices, documents, complaints, fees, library, placements, reports, import, hardening.
+- `npm run lint`, `npm run typecheck`, `npm run build` - also run in CI (`.github/workflows/ci.yml`).
 
-| Side | Framework | Command |
-|---|---|---|
-| Server | Jest with Supertest (integration tests against the Express app and a MongoDB test database; `mongodb-memory-server` is available as an in-memory fallback) | `npm --prefix server test` |
-| Client | Vitest with Testing Library and jsdom | `npm --prefix client test` |
-| End-to-end | Playwright + axe-core against the production build (Express serving `client/dist`, in-memory MongoDB, demo data) | `npm run test:e2e` |
-| Production smoke | Boots the real `server.js` in production mode and checks readiness, caching, compression, headers and shutdown | `npm run smoke` |
-| All unit/integration | | `npm test` |
-
-The server tests use a separate test database (`MONGODB_URI_TEST`) and a temporary upload folder, so they do not touch development data in the normal configuration.
-
-### 16.2 Test files present
-
-**Server (`server/tests/`)**: 103 tests across six files plus shared helpers (`npm run test:coverage` reports coverage).
-
-| File | Areas covered |
-|---|---|
-| `auth.test.js` (11) | Login, password hashing, uniform error messages, payload validation, NoSQL injection, token requirement, `/me`, refresh rotation and logout, change password, account deactivation, forgot/reset password |
-| `students-rbac.test.js` (14) | Role-based access control (401/403 behaviour, student/parent/faculty scoping), student creation with account, duplicate and validation checks, list search/filter/sort/pagination, updates, self-service edits, soft delete, audit logs not containing passwords |
-| `attendance-marks.test.js` (14) | Class roster, marking permissions, duplicate prevention, invalid input, percentage and threshold calculation, correction workflow, mark entry permissions and validation, grades/SGPA/CGPA, grade-scale configuration, class performance |
-| `hardening.test.js` (16) | Refresh-token cookie transport (httpOnly, rotation, reuse rejection, logout), account lockout, strict input sanitising, health/readiness, request ids, security headers, create-admin script |
-| `admin-modules.test.js` (17) | User administration (create/deactivate/reset, self-protection), faculty CRUD/export/subject assignment, settings and logo upload, audience-scoped calendar, audit-log filters, study-material access control |
-| `modules.test.js` (25) | Academic structure rules, timetable and exam conflicts, seating, assignments and uploads, submissions and evaluation, deadline reminder job, protected file access, notices targeting and visibility, notifications, documents, complaints, achievements, bulk import, fees, library, placements, reports (JSON/CSV/PDF), dashboards, audit trail |
-
-**Client (`client/src/__tests__/`)**: 55 tests across eight files (`npm --prefix client run test:coverage`).
-
-| File | Areas covered |
-|---|---|
-| `Components.test.jsx` (8) | `DataTable`, pagination, UI primitives (badge, progress bar, empty/error states, modal) and the confirmation dialog |
-| `DynamicForm.test.jsx` (3) | Required-field and format validation, submission of nested values, mapping of API errors onto fields |
-| `validation.test.js` (5) | Password policy, file validation, format helpers, field validation |
-| `format.test.js` (6) | Date, money, name and dotted-path helpers |
-| `apiClient.test.js` (8) | In-memory token store, error-message mapping, request pipeline (credentials, bearer header) |
-| `hooks.test.jsx` (10) | `useFetch` (errors, retry, stale responses), `useListQuery`, `useDebounce`, `useDismiss`, `useToggle` |
-| `pages.test.jsx` (10) | Registration and forgot-password flows, session restore through the refresh cookie, error boundary, file links |
-| `auth.test.jsx` (4) | Route guards, login validation, server error display, tokens kept out of web storage |
-
-**End-to-end (`e2e/tests/`)**: authentication and session restore, lockout, role guards, every sidebar page for each of the four roles (no console errors, no 5xx), WCAG 2.1 A/AA axe scans of the main pages for each role, and mobile layout checks.
-
-### 16.3 Build, lint and CI
-
-- A production client build is available with `npm run build` (Vite).
-- `npm run lint` (ESLint) and `npm run format:check` (Prettier) cover the whole repository.
-- `npm run check` runs lint, format check, all tests, the build and the production smoke test.
-- `.github/workflows/ci.yml` runs lint, server and client tests with coverage, a dependency audit, the end-to-end suite and a Docker image build with a smoke test on every push and pull request.
 
 ## 17. Project Structure
 
-```text
-student_mng_sys/
-├── README.md                 Setup guide and feature summary
-├── PROJECT_PLAN.md           Original architecture and design notes
-├── CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE
-├── package.json              Root scripts (lint, format, test, build, smoke, check, ...)
-├── eslint.config.js, .prettierrc.json, .editorconfig
-├── Dockerfile, docker-compose.yml, .env.example, .dockerignore
-├── .github/                  CI workflow and Dependabot configuration
-├── scripts/                  smoke-prod.mjs, backup.sh, restore.sh
-├── e2e/                      Playwright end-to-end and accessibility tests
-├── docs/
-│   ├── API.md                Endpoint reference
-│   ├── DEPLOYMENT.md         Deployment, backup and operations guide
-│   └── PROJECT_DOCUMENTATION.md  This document
-├── client/                   React front end
-│   ├── index.html
-│   ├── vite.config.js        Dev server (port 5173), /api proxy, Vitest config
-│   ├── .env.example
-│   └── src/
-│       ├── main.jsx          Entry point and providers
-│       ├── App.jsx           Routes and route guards
-│       ├── api/client.js     Axios instance, in-memory token, cookie-based refresh, file helpers
-│       ├── components/       DataTable, DynamicForm, ResourcePage, ui, Confirm, ErrorBoundary, FileLink, Icon
-│       ├── context/          AuthContext, SettingsContext
-│       ├── hooks/            Data-fetching and UI hooks
-│       ├── layouts/          AppLayout (sidebar, top bar)
-│       ├── pages/            One file per screen
-│       ├── routes/nav.js     Role-filtered sidebar definition
-│       ├── styles/           index.css
-│       ├── utils/            format.js, validation.js
-│       └── __tests__/        Vitest tests
-└── server/                   Express API
-    ├── .env.example
-    ├── package.json
-    ├── uploads/              Uploaded files (git-ignored, created at runtime)
-    ├── tests/                Jest + Supertest tests and helpers
-    └── src/
-        ├── server.js         Entry point
-        ├── app.js            Express app
-        ├── seed.js           Demo data
-        ├── scripts/          create-admin.js (first administrator, production-safe)
-        ├── config/           env.js, db.js
-        ├── controllers/      Request handlers
-        ├── middleware/       auth, security, validate, upload, error
-        ├── models/           Mongoose schemas
-        ├── routes/           API routers
-        ├── services/         Business logic helpers
-        ├── validators/       Zod schemas
-        ├── jobs/             Background jobs
-        ├── utils/            Helpers and logger
-        └── logs/             error.log (development only)
 ```
+app/            (auth)/ (dashboard)/ api/  layout.tsx  globals.css
+components/     ui/ layout/ providers/ students/
+lib/            mongodb, auth, api, permissions, upload, query, csv, nav, api-client, format, validation, seed
+models/         Mongoose models
+services/       business logic
+validators/     Zod schemas
+hooks/          React hooks
+scripts/        seed.ts, create-admin.ts
+tests/          Vitest suites
+proxy.ts        page gate (Next middleware)
+instrumentation.ts   background job bootstrap
+public/  uploads/  docs/
+```
+
 
 ## 18. Current Limitations
 

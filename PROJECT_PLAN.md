@@ -1,3 +1,6 @@
+> **Historical design notes.** The project was originally built as MERN (Express + React/Vite) and has since been migrated to a single
+> Next.js App Router application. For the current architecture see `docs/PROJECT_DOCUMENTATION.md` and `MIGRATION_PLAN.md`.
+
 # Student Management System — Project Plan
 
 ## 0. Repository state

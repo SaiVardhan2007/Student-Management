@@ -1,16 +1,13 @@
 # API Reference
 
-Base URL (local): `http://localhost:5000/api`  ·  All bodies are JSON unless noted (`multipart/form-data` for uploads).
+Base URL (local): `http://localhost:3000/api`  ·  All bodies are JSON unless noted (`multipart/form-data` for uploads).
 
 ## Conventions
 
 **Authentication** — `Authorization: Bearer <accessToken>` on every endpoint except those marked *Public*.
 Access tokens live 15 minutes; use `POST /auth/refresh` (refresh tokens rotate and are single use).
 
-**Token transport** — browser clients send `X-Token-Transport: cookie`; the server then keeps the refresh token in an
-`httpOnly; SameSite=Strict; Path=/api/auth` cookie (`Secure` when `COOKIE_SECURE=true`) and omits it from the JSON body, so
-`/auth/refresh` and `/auth/logout` need no body. Other clients (scripts, tests) omit the header and receive `refreshToken` in the
-body, passing it back in the body as before.
+**Token transport** — browser clients send `X-Token-Transport: cookie`; the server then sets two `httpOnly; SameSite=Strict` cookies (`sms_access`, path `/`; `sms_refresh`, path `/api/auth`; `Secure` when `COOKIE_SECURE=true`) and returns no tokens in the JSON body. `/auth/refresh` and `/auth/logout` need no body. Other clients (scripts, tests) omit the header and receive `accessToken`/`refreshToken` in the JSON body and send `Authorization: Bearer`.
 
 **Request ids** — every response carries `X-Request-Id` (a client-supplied value is echoed); it also appears in the server log.
 
@@ -44,7 +41,7 @@ body, passing it back in the body as before.
 (student → self, parent → linked children, faculty → subjects they teach and the students enrolled in them).
 
 **Uploads**: field name in brackets. Allowed: pdf, doc(x), ppt(x), xls(x), txt, csv, png, jpg, zip; max `MAX_FILE_SIZE_MB` (default 10).
-Extension, MIME type and file signature are all checked. Files are stored in `server/uploads/<category>/` under random names and
+Extension, MIME type and file signature are all checked. Files are stored in `uploads/<category>/` under random names and
 are served only through `GET /files/:category/:filename` (login required; documents/submissions/complaints/achievements are owner- or staff-only).
 
 ---
