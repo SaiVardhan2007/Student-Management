@@ -85,7 +85,7 @@ const GROUPS = [
   { d: 'CIVIL', sec: 'A', prefix: '24CE', from: 6001, n: 8, batch: '2024-2028', sem: 5 },
   { d: 'MBA', sec: 'A', prefix: '25MBA', from: 7001, n: 10, batch: '2025-2027', sem: 3 },
 ];
-// the six students from the project team (CSE-A); gender left blank on purpose
+// the six students from the project team (CSE-A): no login account is created, and gender is left blank on purpose
 const TEAM: Record<string, [string, string]> = {
   '24CSE4007': ['Vishnupriya', ''], '24CSE4008': ['Nithwesh', ''], '24CSE4009': ['Jashwanth', 'Reddy'],
   '24CSE4010': ['Tharun', ''], '24CSE4011': ['Chandrika', ''], '24CSE4012': ['Sai', 'Vardhan'],
@@ -175,11 +175,12 @@ async function main() {
       }
       nameKeys.add(firstName + lastName);
       const email = `${studentId.toLowerCase()}@example.com`;
-      const user = await account(`${firstName} ${lastName}`.trim(), email, 'student', studentId);
+      // team members get no login: they sign up themselves (Register page) with their admission number and this email
+      const user = team ? null : await account(`${firstName} ${lastName}`.trim(), email, 'student', studentId);
       const [area, pincode] = pick(AREAS);
       const guardianName = `${pick(g.d === 'MBA' ? MALE : MALE)} ${lastName || pick(LAST)}`;
       const s = await M.Student.create({
-        user: user._id, studentId, firstName, lastName: lastName || '-', email,
+        user: user?._id, studentId, firstName, lastName: lastName || '-', email,
         phone: `${pick(['98', '99', '90', '91', '70', '63'])}${String(10000000 + Math.floor(rnd() * 89999999))}`,
         gender, dateOfBirth: new Date(Date.UTC(g.d === 'MBA' ? 2002 : 2006, Math.floor(rnd() * 12), 1 + Math.floor(rnd() * 27))),
         address: { line1: `H.No ${1 + Math.floor(rnd() * 90)}-${1 + Math.floor(rnd() * 99)}, ${area}`, city: ['Warangal', 'Karimnagar', 'Khammam', 'Nizamabad', 'Vijayawada', 'Guntur'].includes(area) ? area : 'Hyderabad', state: ['Vijayawada', 'Guntur'].includes(area) ? 'Andhra Pradesh' : 'Telangana', pincode, country: 'India' },
@@ -466,7 +467,7 @@ async function main() {
 
   // ---- notifications
   const notifications: any[] = [];
-  for (const s of students) {
+  for (const s of students.filter((x) => x.user)) {
     notifications.push({ user: s.user, title: 'Mid Semester 1 schedule published', message: 'Check the Examinations page for dates and halls.', type: 'exam', link: '/exams', isRead: rnd() < 0.4 });
     notifications.push({ user: s.user, title: 'Fee payment reminder', message: 'Pay your pending semester fees before the due date.', type: 'fee', link: '/fees', isRead: rnd() < 0.3 });
   }
