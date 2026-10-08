@@ -1,7 +1,8 @@
+// Handles file uploads: checks type, size and file signature, then saves files with random names.
 import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
 import { env } from './env';
+import { putFile, deleteFile } from './storage';
 import { AppError } from './errors';
 
 export const UPLOAD_CATEGORIES = [
@@ -69,8 +70,8 @@ export interface UploadedFile {
   size: number;
   /** stored (random) file name — absent for in-memory uploads */
   filename?: string;
-  /** absolute path on disk — absent for in-memory uploads */
-  path?: string;
+  /** upload category the file was stored under — absent for in-memory uploads */
+  category?: string;
   buffer?: Buffer;
 }
 
@@ -98,7 +99,7 @@ export type ParsedMultipart = { fields: Record<string, any>; files: UploadedFile
 
 /**
  * Parse a multipart/form-data request: validates type (extension + MIME + magic bytes), size and count, then writes
- * accepted files to the local upload directory under a random name.
+ * accepted files to storage (disk or GridFS) under a random name.
  */
 export async function parseMultipart(request: Request, spec: UploadSpec): Promise<ParsedMultipart> {
   let form: FormData;
@@ -108,16 +109,19 @@ export async function parseMultipart(request: Request, spec: UploadSpec): Promis
     throw AppError.badRequest('Malformed multipart form data');
   }
   const field = spec.field || 'file';
-  const exts = spec.csvInMemory ? ['.csv'] : spec.imageOnly ? IMAGE_ONLY : Object.keys(ALLOWED);
+  let exts = Object.keys(ALLOWED);
+  if (spec.csvInMemory) exts = ['.csv'];
+  else if (spec.imageOnly) exts = IMAGE_ONLY;
   const maxBytes = spec.csvInMemory ? 5 * 1024 * 1024 : env.maxFileSizeMb * 1024 * 1024;
-  const maxFiles = spec.csvInMemory ? 1 : spec.multiple ? MAX_FILES : 1;
+  const maxFiles = spec.multiple && !spec.csvInMemory ? MAX_FILES : 1;
 
   const fields: Record<string, any> = {};
   const incoming: { name: string; file: File }[] = [];
   for (const [name, value] of form.entries()) {
     if (typeof value === 'string') {
-      if (name in fields) fields[name] = Array.isArray(fields[name]) ? [...fields[name], value] : [fields[name], value];
-      else fields[name] = value;
+      if (!(name in fields)) fields[name] = value;
+      else if (Array.isArray(fields[name])) fields[name].push(value);
+      else fields[name] = [fields[name], value];
     } else if (value.size === 0 && !value.name) {
       continue; // empty file input
     } else {
@@ -142,17 +146,15 @@ export async function parseMultipart(request: Request, spec: UploadSpec): Promis
 
   const files: UploadedFile[] = [];
   if (spec.csvInMemory) {
-    for (const { file, buffer } of prepared)
+    for (const { file, buffer } of prepared) {
       files.push({ fieldname: field, originalname: file.name, mimetype: file.type, size: file.size, buffer });
+    }
   } else {
-    const dir = path.join(env.uploadDir, spec.category);
-    await fs.promises.mkdir(dir, { recursive: true });
     try {
       for (const { file, buffer } of prepared) {
         const filename = `${crypto.randomBytes(16).toString('hex')}${path.extname(file.name).toLowerCase()}`;
-        const abs = path.join(dir, filename);
-        await fs.promises.writeFile(abs, buffer);
-        files.push({ fieldname: field, originalname: file.name, mimetype: file.type, size: file.size, filename, path: abs });
+        await putFile(spec.category, filename, buffer, file.type);
+        files.push({ fieldname: field, originalname: file.name, mimetype: file.type, size: file.size, filename, category: spec.category });
       }
     } catch (err) {
       await removeUploadedFiles(files);
@@ -174,11 +176,9 @@ export const toFileMeta = (file: UploadedFile | undefined, category: string) =>
 /** Best-effort removal of a stored file (e.g. when it is replaced or the DB write fails). */
 export function removeFile(meta: any) {
   const rel = typeof meta === 'string' ? meta : meta?.path;
-  if (!rel) return;
-  const abs = path.resolve(env.uploadDir, rel);
-  if (abs.startsWith(path.resolve(env.uploadDir) + path.sep)) fs.promises.unlink(abs).catch(() => {});
+  if (rel) void deleteFile(rel);
 }
 
 export async function removeUploadedFiles(files: UploadedFile[]) {
-  await Promise.all(files.filter((f) => f.path).map((f) => fs.promises.unlink(f.path!).catch(() => {})));
+  await Promise.all(files.filter((f) => f.category && f.filename).map((f) => deleteFile(`${f.category}/${f.filename}`)));
 }

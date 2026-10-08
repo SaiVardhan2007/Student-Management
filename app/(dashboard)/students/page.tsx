@@ -1,5 +1,9 @@
 'use client';
 
+// Student list. Admin can add, edit, deactivate/reactivate, import and export students.
+// Faculty see students in their subjects and parents see their own children (read only).
+// Uses the /students API through ResourcePage.
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -12,7 +16,6 @@ import { useConfirm } from '@/components/providers/confirm-provider';
 import { api, downloadFrom, errorMessage } from '@/lib/api-client';
 import { fmtDate } from '@/lib/format';
 import { SEMESTERS, STATUSES } from '@/lib/constants';
-
 
 const deptField = { name: 'department', label: 'Department', type: 'select', required: true, optionsUrl: '/departments' };
 const programField = {
@@ -73,6 +76,7 @@ const studentFields = [
   { name: 'address.pincode', label: 'PIN / ZIP' },
 ];
 
+// Shown once after a student is created, because the temporary password cannot be viewed again.
 function CredentialsModal({ info, onClose }: any) {
   const copy = async () => {
     try {
@@ -114,27 +118,31 @@ function CredentialsModal({ info, onClose }: any) {
 export default function Students() {
   const { user } = useAuth();
   const confirm = useConfirm();
+  // Holds the new student's login details until the admin closes the credentials popup
   const [creds, setCreds] = useState(null);
   const isAdmin = user.role === 'admin';
   const isParent = user.role === 'parent';
 
-  const exportCsv = async () => {
+  let subtitle = 'Students enrolled in your subjects';
+  if (isAdmin) subtitle = 'Manage student records, enrolment and status';
+  if (isParent) subtitle = 'Students linked to your account';
+
+  // exports what the table currently shows: the same search text and filters
+  const exportCsv = async (params) => {
     try {
-      await downloadFrom('/students/export', {}, 'students.csv');
+      await downloadFrom('/students/export', params, 'students.csv');
     } catch (err) {
       toast.error(errorMessage(err, 'Unable to export students.'));
     }
   };
 
   const activate = async (row, reload) => {
-    if (
-      !(await confirm({
-        title: 'Reactivate student?',
-        message: `${row.firstName} ${row.lastName} will be able to log in again.`,
-        confirmLabel: 'Reactivate',
-      }))
-    )
-      return;
+    const confirmed = await confirm({
+      title: 'Reactivate student?',
+      message: `${row.firstName} ${row.lastName} will be able to log in again.`,
+      confirmLabel: 'Reactivate',
+    });
+    if (!confirmed) return;
     try {
       await api.post(`/students/${row._id}/activate`);
       toast.success('Student reactivated');
@@ -148,13 +156,7 @@ export default function Students() {
     <>
       <ResourcePage
         title={isParent ? 'My children' : 'Students'}
-        subtitle={
-          isAdmin
-            ? 'Manage student records, enrolment and status'
-            : isParent
-              ? 'Students linked to your account'
-              : 'Students enrolled in your subjects'
-        }
+        subtitle={subtitle}
         endpoint="/students"
         entity="student"
         createLabel="Add student"
@@ -164,20 +166,22 @@ export default function Students() {
         defaults={{ status: 'active', semester: '1' }}
         canCreate={isAdmin}
         canEdit={() => isAdmin}
+        // Deleting only deactivates a student, so already inactive students cannot be deleted again
         canDelete={(r) => isAdmin && r.status !== 'inactive'}
         deleteMessage={(r) =>
           `Deactivate ${r.firstName} ${r.lastName}? Their login will be disabled but all records are kept. You can reactivate them later.`
         }
         modalSize="lg"
         limit={15}
+        // Only a newly created student comes back with a temporary password
         onSaved={(d) => d?.temporaryPassword && setCreds(d)}
-        headerActions={
+        headerActions={(list) =>
           isAdmin && (
             <>
               <Link className="btn" href="/import">
                 Bulk import
               </Link>
-              <Button icon="download" onClick={exportCsv}>
+              <Button icon="download" onClick={() => exportCsv(list.queryParams)}>
                 Export CSV
               </Button>
             </>

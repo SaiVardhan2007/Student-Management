@@ -1,5 +1,7 @@
 'use client';
 
+// Login page. After signing in, the user goes back to the page they came from (?next=...) or the dashboard.
+
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -9,14 +11,21 @@ import { errorMessage } from '@/lib/api-client';
 import { Button, Field } from '@/components/ui';
 import Icon from '@/components/ui/icon';
 
-/** Only follow same-site paths after signing in (never an external URL). */
-const safeNext = (v: string | null) => (v && v.startsWith('/') && !v.startsWith('//') && !v.startsWith('/login') ? v : '/');
+/**
+ * Returns where to go after login. Only paths inside this site are allowed,
+ * so a crafted link like ?next=//evil.com cannot send the user to another website.
+ */
+function safeNext(next: string | null) {
+  if (!next) return '/';
+  const isSitePath = next.startsWith('/') && !next.startsWith('//');
+  if (!isSitePath || next.startsWith('/login')) return '/';
+  return next;
+}
 
 function LoginForm() {
   const { login } = useAuth();
   const { settings } = useSettings();
   const router = useRouter();
-  const navigate = (to: string, opts?: { replace?: boolean }) => (opts?.replace ? router.replace(to) : router.push(to));
   const next = safeNext(useSearchParams().get('next'));
   const [form, setForm] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState<any>({});
@@ -29,12 +38,12 @@ function LoginForm() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) found.email = 'Enter a valid email address';
     if (!form.password) found.password = 'Password is required';
     setErrors(found);
-    if (Object.keys(found).length) return;
+    if (Object.keys(found).length > 0) return;
     setBusy(true);
     setError('');
     try {
       await login(form.email.trim(), form.password);
-      navigate(next, { replace: true });
+      router.replace(next);
     } catch (err) {
       setError(errorMessage(err, 'Unable to sign in. Please try again.'));
     } finally {
@@ -94,6 +103,7 @@ function LoginForm() {
   );
 }
 
+// useSearchParams needs a Suspense boundary in the Next.js App Router
 export default function Login() {
   return (
     <Suspense fallback={null}>

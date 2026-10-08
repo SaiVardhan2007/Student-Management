@@ -1,5 +1,8 @@
 'use client';
 
+// Profile for every role: basic details and change password. Students can also upload a photo
+// and edit contact and guardian details. Uses /auth/change-password and /students/me.
+
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api, errorMessage, fetchImageUrl, sessionHint } from '@/lib/api-client';
@@ -10,12 +13,14 @@ import { Alert, Avatar, Badge, Button, Card, Field, PageHeader } from '@/compone
 import { fileProblem, passwordProblem } from '@/lib/validation';
 import { fmtDateTime } from '@/lib/format';
 
+// Change-password form. Validation runs in the browser first; the server checks the current password.
 function ChangePassword() {
   const { user, setUser } = useAuth();
   const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [errors, setErrors] = useState<any>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Returns an onChange handler for one field, and clears that field's error while typing
   const set = (k) => (e) => {
     setForm({ ...form, [k]: e.target.value });
     setErrors({ ...errors, [k]: undefined });
@@ -98,21 +103,24 @@ function ChangePassword() {
   );
 }
 
+// Photo and contact details, shown to students only.
 function StudentProfile() {
   const { data: s, loading, reload } = useFetch('/students/me');
   const [photo, setPhoto] = useState(null);
   const ref = useRef(null);
   const [busy, setBusy] = useState(false);
 
+  // Download the photo as a temporary browser URL, and free it when the photo changes or the page closes.
   useEffect(() => {
     let url;
-    if (s?.photo)
+    if (s?.photo) {
       fetchImageUrl(s.photo)
         .then((u) => {
           url = u;
           setPhoto(u);
         })
-        .catch(() => {});
+        .catch(() => {}); // no photo shown if loading fails; the Avatar falls back to initials
+    }
     return () => url && URL.revokeObjectURL(url);
   }, [s?.photo]);
 

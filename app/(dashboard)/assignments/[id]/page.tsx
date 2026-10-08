@@ -1,5 +1,9 @@
 'use client';
 
+// Assignment detail. Everyone sees the assignment info. Students submit (or resubmit) work until
+// it is evaluated; faculty/admin see all submissions and give marks and feedback.
+// APIs: /assignments/:id, /assignments/:id/submit, /assignments/:id/submissions
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useRouter, useParams } from 'next/navigation';
@@ -12,6 +16,7 @@ import FileLink from '@/components/ui/file-link';
 import { fileProblem } from '@/lib/validation';
 import { fmtDateTime, fullName } from '@/lib/format';
 
+/** Student form: upload up to 5 files and/or write an answer. */
 function SubmitForm({ assignment, existing, onDone }: any) {
   const [files, setFiles] = useState([]);
   const [text, setText] = useState(existing?.text || '');
@@ -22,12 +27,12 @@ function SubmitForm({ assignment, existing, onDone }: any) {
     e.preventDefault();
     setError('');
     for (const f of files) {
-      const p = fileProblem(f);
-      if (p) return setError(`${f.name}: ${p}`);
+      const problem = fileProblem(f);
+      if (problem) return setError(`${f.name}: ${problem}`);
     }
     if (!files.length && !text.trim()) return setError('Attach a file or write your answer before submitting.');
     const fd = new FormData();
-    files.forEach((f) => fd.append('files', f));
+    for (const f of files) fd.append('files', f);
     if (text.trim()) fd.append('text', text.trim());
     setBusy(true);
     try {
@@ -74,6 +79,48 @@ function SubmitForm({ assignment, existing, onDone }: any) {
   );
 }
 
+/** Modal where faculty give marks and feedback for one submission. */
+function EvaluateModal({ assignment, submission, student, onClose, onSaved }: any) {
+  const save = async (v) => {
+    await api.patch(`/assignments/submissions/${submission._id}/evaluate`, {
+      marks: Number(v.marks),
+      ...(v.feedback ? { feedback: v.feedback } : {}),
+    });
+    toast.success('Evaluation saved');
+    onSaved();
+  };
+
+  return (
+    <Modal title={`Evaluate — ${fullName(student)}`} onClose={onClose} size="sm">
+      {submission.text && (
+        <Alert tone="info">
+          <strong>Answer:</strong> {submission.text}
+        </Alert>
+      )}
+      <div style={{ height: 10 }} />
+      <DynamicForm
+        initial={{ marks: submission.marks ?? '', feedback: submission.feedback || '' }}
+        fields={[
+          {
+            name: 'marks',
+            label: `Marks (max ${assignment.maxMarks})`,
+            type: 'number',
+            min: 0,
+            max: assignment.maxMarks,
+            step: 0.5,
+            required: true,
+          },
+          { name: 'feedback', label: 'Feedback', type: 'textarea', maxLength: 2000 },
+        ]}
+        onSubmit={save}
+        onCancel={onClose}
+        submitLabel="Save evaluation"
+      />
+    </Modal>
+  );
+}
+
+/** Staff view: one row per student with their submission (if any) and an evaluate button. */
 function Submissions({ id }: any) {
   const { data, loading, error, reload } = useFetch(`/assignments/${id}/submissions`);
   const [evaluating, setEvaluating] = useState(null);
@@ -138,40 +185,16 @@ function Submissions({ id }: any) {
         </table>
       </div>
       {evaluating && (
-        <Modal title={`Evaluate — ${fullName(evaluating.student)}`} onClose={() => setEvaluating(null)} size="sm">
-          {evaluating.submission.text && (
-            <Alert tone="info">
-              <strong>Answer:</strong> {evaluating.submission.text}
-            </Alert>
-          )}
-          <div style={{ height: 10 }} />
-          <DynamicForm
-            initial={{ marks: evaluating.submission.marks ?? '', feedback: evaluating.submission.feedback || '' }}
-            fields={[
-              {
-                name: 'marks',
-                label: `Marks (max ${assignment.maxMarks})`,
-                type: 'number',
-                min: 0,
-                max: assignment.maxMarks,
-                step: 0.5,
-                required: true,
-              },
-              { name: 'feedback', label: 'Feedback', type: 'textarea', maxLength: 2000 },
-            ]}
-            onSubmit={async (v) => {
-              await api.patch(`/assignments/submissions/${evaluating.submission._id}/evaluate`, {
-                marks: Number(v.marks),
-                ...(v.feedback ? { feedback: v.feedback } : {}),
-              });
-              toast.success('Evaluation saved');
-              setEvaluating(null);
-              reload();
-            }}
-            onCancel={() => setEvaluating(null)}
-            submitLabel="Save evaluation"
-          />
-        </Modal>
+        <EvaluateModal
+          assignment={assignment}
+          submission={evaluating.submission}
+          student={evaluating.student}
+          onClose={() => setEvaluating(null)}
+          onSaved={() => {
+            setEvaluating(null);
+            reload();
+          }}
+        />
       )}
     </Card>
   );
@@ -181,12 +204,12 @@ export default function AssignmentDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const router = useRouter();
-  const navigate = (to: string, opts?: { replace?: boolean }) => (opts?.replace ? router.replace(to) : router.push(to));
   const { data: a, loading, error, reload } = useFetch(`/assignments/${id}`);
   if (loading) return <PageLoader />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
   const sub = a.submission;
   const isStudent = user.role === 'student';
+  // Once evaluated, the student can no longer change the submission.
   const locked = sub?.status === 'evaluated';
 
   return (
@@ -195,7 +218,7 @@ export default function AssignmentDetail() {
         title={a.title}
         subtitle={`${a.subject?.code} · ${a.subject?.name}`}
         actions={
-          <Button icon="chevronLeft" onClick={() => navigate('/assignments')}>
+          <Button icon="chevronLeft" onClick={() => router.push('/assignments')}>
             All assignments
           </Button>
         }

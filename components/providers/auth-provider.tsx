@@ -1,5 +1,7 @@
 'use client';
 
+// Provides the signed-in user and login/register/logout functions to the app via useAuth().
+
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, sessionHint, refreshSession, setSessionExpiredHandler } from '@/lib/api-client';
 
@@ -21,6 +23,7 @@ export function AuthProvider({
 }) {
   const [user, setUser] = useState<any>(initialUser);
   const [profile, setProfile] = useState<any>(initialProfile);
+  // Loading only while we may still be able to restore a session (see the effect below)
   const [loading, setLoading] = useState(!initialUser && sessionHint.has);
 
   const clear = useCallback(() => {
@@ -29,6 +32,7 @@ export function AuthProvider({
     setProfile(null);
   }, []);
 
+  // If the API client cannot refresh the session any more, sign the user out here too
   useEffect(() => {
     setSessionExpiredHandler(clear);
   }, [clear]);
@@ -64,6 +68,8 @@ export function AuthProvider({
 
   const register = useCallback(async (payload: Record<string, any>) => {
     const res = await api.post('/auth/register', payload);
+    // faculty sign-ups are not signed in: they wait for admin approval
+    if (res.data.data?.pending) return { pending: true, message: res.data.message };
     const { user: u, profile: p } = res.data.data;
     sessionHint.set();
     setUser(u);
@@ -105,6 +111,7 @@ export function AuthProvider({
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/** Access the auth state: const { user, login, logout, hasRole } = useAuth(); */
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');

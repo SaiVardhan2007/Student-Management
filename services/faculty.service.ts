@@ -1,24 +1,28 @@
+// Faculty service: list/create/update faculty members, activate/deactivate, assign subjects, CSV export.
+// Each faculty member also has a login account (User) that is kept in sync.
 import type { Ctx } from '@/lib/context';
 import { Faculty, User, Department, Subject, Section } from '@/models';
 import { AppError } from '@/lib/errors';
 import { ok, created } from '@/lib/response';
-import { paginate, filtersFromQuery, requireValidId, type FilterSpec } from '@/lib/query';
+import { paginate, filtersFromQuery, requireValidId, escapeRegex, type FilterSpec } from '@/lib/query';
 import { facultyProfile } from '@/lib/auth';
 import { createAccount } from '@/services/accounts';
 import { audit } from '@/services/audit';
 import { csvResponse } from '@/lib/csv';
+import { applyUpdate } from '@/services/crud';
 
 const POPULATE = [{ path: 'department', select: 'name code' }];
 const FILTERS: FilterSpec = { department: 'id', status: 'string', designation: 'string' };
 
-const withSubjects = async (f) => {
-  const subjects = await Subject.find({ faculty: f._id })
+// Faculty details plus the subjects they teach.
+async function withSubjects(faculty) {
+  const subjects = await Subject.find({ faculty: faculty._id })
     .populate('program', 'name code')
     .populate('sections', 'name semester')
     .select('code name semester credits type program sections')
     .lean();
-  return { ...f.toJSON(), subjects };
-};
+  return { ...faculty.toJSON(), subjects };
+}
 
 export async function list(ctx: Ctx) {
   const { items, meta } = await paginate(Faculty, ctx, {
@@ -59,6 +63,7 @@ export async function create(ctx: Ctx) {
   try {
     f = await Faculty.create({ ...data, user: user._id });
   } catch (err) {
+    // do not leave a login account behind without a faculty record
     await User.deleteOne({ _id: user._id });
     throw err;
   }
@@ -71,16 +76,30 @@ export async function update(ctx: Ctx) {
   const f = await Faculty.findById(ctx.params.id);
   if (!f) throw AppError.notFound('Faculty member not found');
   if (ctx.body.department && !(await Department.exists({ _id: ctx.body.department }))) throw AppError.badRequest('Department not found');
-  f.set(ctx.body);
+  // the email is also the login: make sure nobody else (faculty or any account) uses it before saving anything
+  if (ctx.body.email && ctx.body.email !== f.email) {
+    const [facultyClash, userClash] = await Promise.all([
+      Faculty.exists({ email: ctx.body.email, _id: { $ne: f._id } }),
+      User.exists({ email: ctx.body.email, ...(f.user ? { _id: { $ne: f.user } } : {}) }),
+    ]);
+    if (facultyClash || userClash)
+      throw AppError.conflict('An account with this email already exists', [{ field: 'email', message: 'Already exists' }]);
+  }
+  applyUpdate(f, ctx.body);
   await f.save();
-  const u: Record<string, any> = {};
-  if (ctx.body.firstName || ctx.body.lastName || ctx.body.email) Object.assign(u, { name: `${f.firstName} ${f.lastName}`, email: f.email });
-  if (ctx.body.status) u.isActive = f.status !== 'inactive';
-  if (Object.keys(u).length && f.user) await User.updateOne({ _id: f.user }, u);
+  // keep the linked login account in sync with the faculty record
+  const userChanges: Record<string, any> = {};
+  if (ctx.body.firstName || ctx.body.lastName || ctx.body.email) {
+    userChanges.name = `${f.firstName} ${f.lastName}`;
+    userChanges.email = f.email;
+  }
+  if (ctx.body.status) userChanges.isActive = f.status !== 'inactive';
+  if (Object.keys(userChanges).length && f.user) await User.updateOne({ _id: f.user }, userChanges);
   await audit(ctx, 'FACULTY_UPDATED', 'Faculty', f._id, { fields: Object.keys(ctx.body) });
   return ok(f, 'Faculty updated');
 }
 
+// Shared by activate and deactivate: change the status and block/allow login.
 async function setActive(ctx: Ctx, active: boolean) {
   requireValidId(ctx.params.id);
   const f = await Faculty.findById(ctx.params.id);
@@ -112,7 +131,12 @@ export async function assignSubjects(ctx: Ctx) {
 }
 
 export async function exportCsv(ctx: Ctx) {
-  const rows = await Faculty.find(filtersFromQuery(ctx.query, FILTERS)).sort({ employeeId: 1 }).populate(POPULATE).limit(20000).lean();
+  const filter: Record<string, any> = filtersFromQuery(ctx.query, FILTERS);
+  if (ctx.query.search) {
+    const rx = new RegExp(escapeRegex(String(ctx.query.search).slice(0, 80)), 'i');
+    filter.$or = ['firstName', 'lastName', 'employeeId', 'email', 'designation'].map((k) => ({ [k]: rx }));
+  }
+  const rows = await Faculty.find(filter).sort({ employeeId: 1 }).populate(POPULATE).limit(20000).lean();
   return csvResponse('faculty.csv', rows, [
     { label: 'Employee ID', value: 'employeeId' },
     { label: 'First Name', value: 'firstName' },

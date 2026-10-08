@@ -2,10 +2,8 @@ import mongoose, { type Model, type Schema } from 'mongoose';
 
 mongoose.set('strictQuery', true);
 
-/**
- * Register a model once. Next.js re-evaluates modules on hot reload (and in separate route bundles), so a plain
- * `mongoose.model(name, schema)` would throw OverwriteModelError.
- */
+// Create a model only once. Next.js can load this code again (hot reload), and creating the same model twice
+// would throw an error, so we reuse the existing one if it is already registered.
 export function registerModel(name: string, schema: Schema): Model<any> {
   return (mongoose.models[name] as Model<any>) || mongoose.model(name, schema);
 }

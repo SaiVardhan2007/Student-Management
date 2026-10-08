@@ -1,4 +1,5 @@
-const P = {
+// SVG icons. Each entry in ICON_PATHS is the drawing path of one icon, looked up by name (<Icon name="edit" />).
+const ICON_PATHS = {
   dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
   users: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
@@ -62,7 +63,7 @@ export default function Icon({ name, size = 18, className, ...rest }: any) {
       className={className}
       {...rest}
     >
-      <path d={P[name] || P.file} />
+      <path d={ICON_PATHS[name] || ICON_PATHS.file} />
     </svg>
   );
 }

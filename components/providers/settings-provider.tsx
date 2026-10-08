@@ -1,5 +1,7 @@
 'use client';
 
+// Provides college settings (name, logo) to the app. Signed-in users load all settings; visitors load the public ones.
+
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api-client';
 import { useAuth } from './auth-provider';
@@ -23,6 +25,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Show the college name in the browser tab
   useEffect(() => {
     document.title = settings.collegeName || APP_NAME;
   }, [settings.collegeName]);

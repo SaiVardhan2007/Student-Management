@@ -1,15 +1,16 @@
+// Marks: entering, viewing and deleting marks, plus subject performance stats and student results.
 import type { Ctx } from '@/lib/context';
 import { Mark, Enrollment, Student, getSettings } from '@/models';
 import { AppError } from '@/lib/errors';
 import { ok } from '@/lib/response';
 import { requireValidId } from '@/lib/query';
 import { studentProfile } from '@/lib/auth';
-import { assertSubjectAccess, assertStudentAccess } from '@/services/access';
+import { assertSubjectAccess, assertStudentAccess, facultySubjectIds } from '@/services/access';
 import { computeResults, gradeFor } from '@/services/grading';
 import { notifyUsers } from '@/services/notify';
 import { audit } from '@/services/audit';
 
-/** Enter/update marks for many students of one subject and component. */
+/** Enter or update marks for many students of one subject and exam component (e.g. 'midterm'). */
 export async function enter(ctx: Ctx) {
   const { subject: subjectId, examType, maxMarks, records } = ctx.body;
   const subject = await assertSubjectAccess(ctx, subjectId);
@@ -31,13 +32,27 @@ export async function enter(ctx: Ctx) {
       notEnrolled.map((n) => ({ field: 'records', message: `Student ${n.student} is not enrolled` }))
     );
 
+  // one maximum per subject + component: other students' saved marks must use the same maximum
+  const clashingMax = await Mark.findOne({
+    subject: subject._id,
+    examType,
+    student: { $nin: records.map((r) => r.student) },
+    maxMarks: { $ne: maxMarks },
+  }).lean<any>();
+  if (clashingMax)
+    throw AppError.badRequest(
+      `Maximum marks for ${examType} is already ${clashingMax.maxMarks} for other students. Use the same maximum, or include every student when changing it.`,
+      [{ field: 'maxMarks', message: `Existing maximum is ${clashingMax.maxMarks}` }]
+    );
+
   const existing = await Mark.find({ subject: subject._id, examType, student: { $in: records.map((r) => r.student) } }).lean();
-  const prev = new Map(existing.map((m) => [String(m.student), m]));
-  const changes = [];
-  const ops = [];
+  const oldMarkByStudent = new Map(existing.map((m) => [String(m.student), m]));
+  const changes = []; // edits to already-saved marks (kept in the audit log)
+  const ops = []; // database writes to run
   for (const r of records) {
-    const old = prev.get(r.student);
-    if (old && old.marksObtained === r.marksObtained && old.maxMarks === maxMarks && (old.remarks || '') === (r.remarks || '')) continue;
+    const old = oldMarkByStudent.get(r.student);
+    const isUnchanged = old && old.marksObtained === r.marksObtained && old.maxMarks === maxMarks && (old.remarks || '') === (r.remarks || '');
+    if (isUnchanged) continue;
     if (old) changes.push({ student: r.student, from: old.marksObtained, to: r.marksObtained });
     ops.push({
       updateOne: {
@@ -46,10 +61,11 @@ export async function enter(ctx: Ctx) {
           $set: {
             marksObtained: r.marksObtained,
             maxMarks,
-            remarks: r.remarks,
+            ...(r.remarks ? { remarks: r.remarks } : {}),
             semester: subject.semester,
             ...(old ? { updatedBy: ctx.user._id } : {}),
           },
+          ...(r.remarks ? {} : { $unset: { remarks: '' } }),
           $setOnInsert: { enteredBy: ctx.user._id },
         },
         upsert: true,
@@ -67,6 +83,7 @@ export async function enter(ctx: Ctx) {
     const students = await Student.find({ _id: { $in: records.map((r) => r.student) } })
       .select('user')
       .lean();
+    // not awaited on purpose: a slow notification should not delay saving marks
     notifyUsers(
       students.map((s) => s.user),
       {
@@ -80,18 +97,19 @@ export async function enter(ctx: Ctx) {
   return ok({ saved: ops.length, unchanged: records.length - ops.length }, 'Marks saved');
 }
 
-/** Class sheet: roster + marks for a subject (optionally a single component). */
+/** Class sheet: the enrolled students of a subject with their marks (optionally one exam component). */
 export async function subjectMarks(ctx: Ctx) {
   requireValidId(ctx.params.subjectId, 'subject');
   const subject = await assertSubjectAccess(ctx, ctx.params.subjectId);
   const { examType, section } = ctx.query;
   const enrolled = await Enrollment.find({ subject: subject._id, status: 'enrolled' }).select('student').lean();
-  const sFilter: Record<string, any> = { _id: { $in: enrolled.map((e) => e.student) }, status: 'active' };
-  if (section) sFilter.section = requireValidId(String(section), 'section');
-  const students = await Student.find(sFilter).select('studentId firstName lastName section').sort({ studentId: 1 }).lean();
-  const mFilter: Record<string, any> = { subject: subject._id, student: { $in: students.map((s) => s._id) } };
-  if (examType) mFilter.examType = String(examType);
-  const marks = await Mark.find(mFilter).lean();
+  const studentFilter: Record<string, any> = { _id: { $in: enrolled.map((e) => e.student) }, status: 'active' };
+  if (section) studentFilter.section = requireValidId(String(section), 'section');
+  const students = await Student.find(studentFilter).select('studentId firstName lastName section').sort({ studentId: 1 }).lean();
+  const markFilter: Record<string, any> = { subject: subject._id, student: { $in: students.map((s) => s._id) } };
+  if (examType) markFilter.examType = String(examType);
+  const marks = await Mark.find(markFilter).lean();
+  // student id -> { examType: { marksObtained, maxMarks, remarks } }
   const byStudent = new Map();
   for (const m of marks) {
     if (!byStudent.has(String(m.student))) byStudent.set(String(m.student), {});
@@ -103,35 +121,51 @@ export async function subjectMarks(ctx: Ctx) {
   });
 }
 
+/** Class statistics for a subject: average, highest, lowest, pass rate and grade distribution. */
 export async function performance(ctx: Ctx) {
   requireValidId(ctx.params.subjectId, 'subject');
   const subject = await assertSubjectAccess(ctx, ctx.params.subjectId);
   const settings = await getSettings();
   const marks = await Mark.find({ subject: subject._id }).lean();
-  const perStudent = new Map();
+
+  // add up each student's marks over all exam components
+  const totals = new Map();
   for (const m of marks) {
-    const e = perStudent.get(String(m.student)) || { o: 0, m: 0 };
-    e.o += m.marksObtained;
-    e.m += m.maxMarks;
-    perStudent.set(String(m.student), e);
+    const t = totals.get(String(m.student)) || { obtained: 0, max: 0 };
+    t.obtained += m.marksObtained;
+    t.max += m.maxMarks;
+    totals.set(String(m.student), t);
   }
-  const pcts = [...perStudent.values()].map((e) => (e.m ? (e.o / e.m) * 100 : 0));
-  const dist = {};
-  for (const p of pcts) {
-    const g = gradeFor(p, settings.gradeScale).grade;
-    dist[g] = (dist[g] || 0) + 1;
+  const percentages: number[] = [];
+  for (const t of totals.values()) {
+    percentages.push(t.max ? (t.obtained / t.max) * 100 : 0);
   }
+
+  // how many students got each grade
+  const gradeCounts = {};
+  for (const p of percentages) {
+    const grade = gradeFor(p, settings.gradeScale).grade;
+    gradeCounts[grade] = (gradeCounts[grade] || 0) + 1;
+  }
+
   const round = (n) => Math.round(n * 100) / 100;
+  const count = percentages.length;
+  if (count === 0) {
+    return ok({ students: 0, average: 0, highest: 0, lowest: 0, passRate: 0, gradeDistribution: [] });
+  }
+  const sum = percentages.reduce((a, b) => a + b, 0);
+  const passed = percentages.filter((p) => p >= settings.passPercentage).length;
   return ok({
-    students: pcts.length,
-    average: pcts.length ? round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : 0,
-    highest: pcts.length ? round(Math.max(...pcts)) : 0,
-    lowest: pcts.length ? round(Math.min(...pcts)) : 0,
-    passRate: pcts.length ? round((pcts.filter((p) => p >= settings.passPercentage).length / pcts.length) * 100) : 0,
-    gradeDistribution: Object.entries(dist).map(([grade, count]) => ({ grade, count })),
+    students: count,
+    average: round(sum / count),
+    highest: round(Math.max(...percentages)),
+    lowest: round(Math.min(...percentages)),
+    passRate: round((passed / count) * 100),
+    gradeDistribution: Object.entries(gradeCounts).map(([grade, n]) => ({ grade, count: n })),
   });
 }
 
+/** Results (grades, SGPA, CGPA) of a student. The id 'me' means the logged-in student. */
 export async function studentResults(ctx: Ctx) {
   let { id } = ctx.params;
   if (id === 'me') {
@@ -142,7 +176,9 @@ export async function studentResults(ctx: Ctx) {
     await assertStudentAccess(ctx, id);
   }
   const semester = ctx.query.semester ? Number(ctx.query.semester) : undefined;
-  return ok(await computeResults(id, { semester }));
+  // faculty only see results for the subjects they teach
+  const subjectIds = ctx.user.role === 'faculty' ? await facultySubjectIds(ctx) : undefined;
+  return ok(await computeResults(id, { semester, subjectIds }));
 }
 
 export async function remove(ctx: Ctx) {

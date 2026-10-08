@@ -1,6 +1,9 @@
+// Attendance calculations: percentage rules and summaries per student / subject.
+// Used by attendance.service.ts and the dashboards.
 import mongoose from 'mongoose';
 import { Attendance, getSettings } from '@/models';
 
+// Aggregation pipelines do not cast strings to ObjectIds automatically, so we do it here.
 const oid = (id) => new mongoose.Types.ObjectId(String(id));
 
 /**
@@ -12,6 +15,7 @@ export function percentage({ present = 0, late = 0, absent = 0 }) {
   return total ? Math.round(((present + late) / total) * 10000) / 100 : null;
 }
 
+// Turn rows like { status: 'present', count: 5 } into { present: 5, absent: 0, late: 0, excused: 0 }.
 function foldCounts(rows) {
   const out = { present: 0, absent: 0, late: 0, excused: 0 };
   for (const r of rows) out[r.status] = r.count;
@@ -19,10 +23,14 @@ function foldCounts(rows) {
 }
 
 /** Overall + per-subject + per-month attendance for one student. */
-export async function summarize(studentId, { from, to, subject }: { from?: Date; to?: Date; subject?: string } = {}) {
+export async function summarize(studentId, { from, to, subject, subjectIds }: { from?: Date; to?: Date; subject?: string; subjectIds?: any[] } = {}) {
   const settings = await getSettings();
   const match: Record<string, any> = { student: oid(studentId) };
-  if (subject) match.subject = oid(subject);
+  if (subjectIds) {
+    // restricted viewer (faculty): only their own subjects, optionally narrowed to one
+    const allowed = subjectIds.map(String);
+    match.subject = { $in: (subject ? allowed.filter((id) => id === String(subject)) : allowed).map(oid) };
+  } else if (subject) match.subject = oid(subject);
   if (from || to) match.date = { ...(from && { $gte: from }), ...(to && { $lte: to }) };
 
   const [bySubject, byMonth] = await Promise.all([
@@ -40,6 +48,7 @@ export async function summarize(studentId, { from, to, subject }: { from?: Date;
     ]),
   ]);
 
+  // group the per-subject rows by subject
   const subjMap = new Map();
   for (const r of bySubject) {
     const k = String(r.subject);
@@ -62,12 +71,16 @@ export async function summarize(studentId, { from, to, subject }: { from?: Date;
     })
     .sort((a, b) => a.code.localeCompare(b.code));
 
-  const overallCounts = subjects.reduce(
-    (a, s) => ({ present: a.present + s.present, absent: a.absent + s.absent, late: a.late + s.late, excused: a.excused + s.excused }),
-    { present: 0, absent: 0, late: 0, excused: 0 }
-  );
+  const overallCounts = { present: 0, absent: 0, late: 0, excused: 0 };
+  for (const s of subjects) {
+    overallCounts.present += s.present;
+    overallCounts.absent += s.absent;
+    overallCounts.late += s.late;
+    overallCounts.excused += s.excused;
+  }
   const overallPct = percentage(overallCounts);
 
+  // group the per-month rows by month
   const monthMap = new Map();
   for (const r of byMonth) {
     if (!monthMap.has(r.month)) monthMap.set(r.month, []);
@@ -84,7 +97,7 @@ export async function summarize(studentId, { from, to, subject }: { from?: Date;
     threshold: settings.attendanceThreshold,
     overall: {
       ...overallCounts,
-      total: Object.values(overallCounts).reduce((a, b) => a + b, 0),
+      total: overallCounts.present + overallCounts.absent + overallCounts.late + overallCounts.excused,
       percentage: overallPct,
       belowThreshold: overallPct !== null && overallPct < settings.attendanceThreshold,
     },

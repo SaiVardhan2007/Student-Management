@@ -1,5 +1,9 @@
 'use client';
 
+// Attendance page. Staff (faculty/admin) can mark attendance, see class reports and review
+// correction requests. Students and parents see their own record and can request corrections.
+// APIs: /attendance/classes, /roster, /class-report, /corrections, /student/:id/history|summary
+
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -26,12 +30,20 @@ import { fmtDate, fullName, todayInput } from '@/lib/format';
 
 const STATUS = ['present', 'absent', 'late', 'excused'];
 
-/* ------------------------------------------------------------------ class picker */
+function capitalize(text: string) {
+  return text[0].toUpperCase() + text.slice(1);
+}
+
+/**
+ * Loads the classes the user teaches and keeps the chosen subject/section in state.
+ * Returns the two dropdowns as ready-made JSX (`picker`) so several tabs can reuse them.
+ */
 function useClassPicker() {
   const { data, loading, error, reload } = useFetch('/attendance/classes');
   const [subject, setSubject] = useState('');
   const [section, setSection] = useState('');
   const cls = data?.find((c) => c.subject._id === subject);
+  // When the subject changes, the old section may not belong to it, so pick the first one.
   useEffect(() => {
     if (cls && !cls.sections.some((s) => s._id === section)) setSection(cls.sections[0]?._id || '');
   }, [cls, section]);
@@ -63,7 +75,63 @@ function useClassPicker() {
   return { picker, subject, section, classes: data, loading, error, reload };
 }
 
-/* ------------------------------------------------------------------ mark attendance (faculty/admin) */
+/** Table of students with a status button group and a remarks box for each one. */
+function RosterTable({ students, marks, setMarks }: any) {
+  const setStatus = (id, status) => setMarks((m) => ({ ...m, [id]: { ...m[id], status } }));
+  const setRemarks = (id, remarks) => setMarks((m) => ({ ...m, [id]: { ...m[id], remarks } }));
+
+  return (
+    <div className="table-wrap">
+      <table className="table responsive">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Student</th>
+            <th>Status</th>
+            <th>Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+          {students.map((s) => (
+            <tr key={s._id}>
+              <td data-label="ID">{s.studentId}</td>
+              <td data-label="Student">
+                <strong>{fullName(s)}</strong>
+              </td>
+              <td data-label="Status">
+                <div className="seg" role="group" aria-label={`Attendance for ${fullName(s)}`}>
+                  {STATUS.map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      className={st}
+                      aria-pressed={marks[s._id]?.status === st}
+                      onClick={() => setStatus(s._id, st)}
+                    >
+                      {capitalize(st)}
+                    </button>
+                  ))}
+                </div>
+              </td>
+              <td data-label="Remarks">
+                <input
+                  className="input"
+                  style={{ minWidth: 140 }}
+                  aria-label={`Remarks for ${fullName(s)}`}
+                  maxLength={300}
+                  value={marks[s._id]?.remarks || ''}
+                  onChange={(e) => setRemarks(s._id, e.target.value)}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Staff tab: pick a class and date, mark every student, then save in one request. */
 function MarkAttendance() {
   const { picker, subject, section, classes, loading, error, reload } = useClassPicker();
   const [date, setDate] = useState(todayInput());
@@ -71,6 +139,7 @@ function MarkAttendance() {
   const [marks, setMarks] = useState<any>({});
   const [saving, setSaving] = useState(false);
 
+  // Fill the form from the saved attendance whenever a new roster is loaded.
   useEffect(() => {
     if (!roster.data) return;
     setMarks(
@@ -81,14 +150,17 @@ function MarkAttendance() {
   }, [roster.data]);
 
   const students = roster.data?.students || [];
-  const counts = useMemo(
-    () => STATUS.reduce((a, k) => ({ ...a, [k]: Object.values(marks).filter((m: any) => m.status === k).length }), {} as Record<string, number>),
-    [marks]
-  );
+  // How many students have each status, e.g. { present: 20, absent: 2, ... }
+  const counts = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const status of STATUS) {
+      result[status] = Object.values(marks).filter((m: any) => m.status === status).length;
+    }
+    return result;
+  }, [marks]);
   const unmarked = students.filter((s) => !marks[s._id]?.status).length;
   const alreadyMarked = students.some((s) => s.attendance);
 
-  const setStatus = (id, status) => setMarks((m) => ({ ...m, [id]: { ...m[id], status } }));
   const markAll = (status) => setMarks(Object.fromEntries(students.map((s) => [s._id, { ...marks[s._id], status }])));
 
   const save = async () => {
@@ -114,6 +186,48 @@ function MarkAttendance() {
   if (!loading && classes && !classes.length)
     return <EmptyState icon="book" title="No classes assigned" message="Ask the administrator to assign subjects to you." />;
 
+  // Decide what to show under the filters.
+  let body;
+  if (!subject || !section) {
+    body = <EmptyState icon="checkCircle" title="Select a class" message="Choose a subject, section and date to load the student list." />;
+  } else if (roster.loading) {
+    body = <PageLoader />;
+  } else if (roster.error) {
+    body = <ErrorState message={roster.error} onRetry={roster.reload} />;
+  } else if (!students.length) {
+    body = <EmptyState icon="users" title="No students found" message="No active students in this section are enrolled in the subject." />;
+  } else {
+    body = (
+      <>
+        <div className="table-toolbar">
+          {alreadyMarked && (
+            <span className="small" style={{ color: 'var(--info)' }}>
+              Already recorded — edits are logged.
+            </span>
+          )}
+          <span className="small muted">
+            Present {counts.present} · Absent {counts.absent} · Late {counts.late} · Excused {counts.excused}
+            {unmarked ? ` · Unmarked ${unmarked}` : ''}
+          </span>
+          <span className="grow" />
+          <Button size="sm" onClick={() => markAll('present')}>
+            All present
+          </Button>
+          <Button size="sm" onClick={() => markAll('absent')}>
+            All absent
+          </Button>
+        </div>
+        <RosterTable students={students} marks={marks} setMarks={setMarks} />
+        <div className="pagination">
+          <span className="small">{students.length} students</span>
+          <Button variant="primary" onClick={save} loading={saving}>
+            Save attendance
+          </Button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <Card title="Mark attendance" bodyClass={null}>
       <div className="card-body">
@@ -124,94 +238,12 @@ function MarkAttendance() {
           </Field>
         </div>
       </div>
-      {!subject || !section ? (
-        <EmptyState icon="checkCircle" title="Select a class" message="Choose a subject, section and date to load the student list." />
-      ) : roster.loading ? (
-        <PageLoader />
-      ) : roster.error ? (
-        <ErrorState message={roster.error} onRetry={roster.reload} />
-      ) : !students.length ? (
-        <EmptyState icon="users" title="No students found" message="No active students in this section are enrolled in the subject." />
-      ) : (
-        <>
-          <div className="table-toolbar">
-            {alreadyMarked && (
-              <span className="small" style={{ color: 'var(--info)' }}>
-                Already recorded — edits are logged.
-              </span>
-            )}
-            <span className="small muted">
-              Present {counts.present} · Absent {counts.absent} · Late {counts.late} · Excused {counts.excused}
-              {unmarked ? ` · Unmarked ${unmarked}` : ''}
-            </span>
-            <span className="grow" />
-            <Button size="sm" onClick={() => markAll('present')}>
-              All present
-            </Button>
-            <Button size="sm" onClick={() => markAll('absent')}>
-              All absent
-            </Button>
-          </div>
-          <div className="table-wrap">
-            <table className="table responsive">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Student</th>
-                  <th>Status</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map((s) => (
-                  <tr key={s._id}>
-                    <td data-label="ID">{s.studentId}</td>
-                    <td data-label="Student">
-                      <strong>{fullName(s)}</strong>
-                    </td>
-                    <td data-label="Status">
-                      <div className="seg" role="group" aria-label={`Attendance for ${fullName(s)}`}>
-                        {STATUS.map((st) => (
-                          <button
-                            key={st}
-                            type="button"
-                            className={st}
-                            aria-pressed={marks[s._id]?.status === st}
-                            onClick={() => setStatus(s._id, st)}
-                          >
-                            {st[0].toUpperCase() + st.slice(1)}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                    <td data-label="Remarks">
-                      <input
-                        className="input"
-                        style={{ minWidth: 140 }}
-                        aria-label={`Remarks for ${fullName(s)}`}
-                        maxLength={300}
-                        value={marks[s._id]?.remarks || ''}
-                        onChange={(e) => setMarks((m) => ({ ...m, [s._id]: { ...m[s._id], remarks: e.target.value } }))}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="pagination">
-            <span className="small">{students.length} students</span>
-            <Button variant="primary" onClick={save} loading={saving}>
-              Save attendance
-            </Button>
-          </div>
-        </>
-      )}
+      {body}
     </Card>
   );
 }
 
-/* ------------------------------------------------------------------ class report */
+/** Staff tab: per-student attendance totals for a class, optionally within a date range. */
 function ClassReport() {
   const { picker, subject, section } = useClassPicker();
   const [range, setRange] = useState({ from: '', to: '' });
@@ -220,6 +252,59 @@ function ClassReport() {
     { subject, section, ...(range.from && { from: range.from }), ...(range.to && { to: range.to }) },
     { enabled: !!subject }
   );
+  let body;
+  if (!subject) {
+    body = <EmptyState icon="chart" title="Select a class" />;
+  } else if (loading) {
+    body = <PageLoader />;
+  } else if (error) {
+    body = <ErrorState message={error} onRetry={reload} />;
+  } else if (!data.rows.length) {
+    body = <EmptyState title="No students" />;
+  } else {
+    body = (
+      <div className="table-wrap">
+        <table className="table responsive">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Student</th>
+              <th>Present</th>
+              <th>Late</th>
+              <th>Absent</th>
+              <th>Excused</th>
+              <th style={{ minWidth: 160 }}>Attendance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.student._id}>
+                <td data-label="ID">{r.student.studentId}</td>
+                <td data-label="Student">
+                  <strong>{fullName(r.student)}</strong>
+                </td>
+                <td data-label="Present">{r.present}</td>
+                <td data-label="Late">{r.late}</td>
+                <td data-label="Absent">{r.absent}</td>
+                <td data-label="Excused">{r.excused}</td>
+                <td data-label="Attendance">
+                  <div className="row-between small">
+                    <strong>
+                      {r.percentage ?? '—'}
+                      {r.percentage != null && '%'}
+                    </strong>
+                    {r.belowThreshold && <Badge tone="danger">Below {data.threshold}%</Badge>}
+                  </div>
+                  <ProgressBar value={r.percentage} threshold={data.threshold} label={`${fullName(r.student)} attendance`} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   return (
     <Card title="Class attendance report" bodyClass={null}>
       <div className="card-body">
@@ -239,63 +324,18 @@ function ClassReport() {
           </Field>
         </div>
       </div>
-      {!subject ? (
-        <EmptyState icon="chart" title="Select a class" />
-      ) : loading ? (
-        <PageLoader />
-      ) : error ? (
-        <ErrorState message={error} onRetry={reload} />
-      ) : !data.rows.length ? (
-        <EmptyState title="No students" />
-      ) : (
-        <div className="table-wrap">
-          <table className="table responsive">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Student</th>
-                <th>Present</th>
-                <th>Late</th>
-                <th>Absent</th>
-                <th>Excused</th>
-                <th style={{ minWidth: 160 }}>Attendance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((r) => (
-                <tr key={r.student._id}>
-                  <td data-label="ID">{r.student.studentId}</td>
-                  <td data-label="Student">
-                    <strong>{fullName(r.student)}</strong>
-                  </td>
-                  <td data-label="Present">{r.present}</td>
-                  <td data-label="Late">{r.late}</td>
-                  <td data-label="Absent">{r.absent}</td>
-                  <td data-label="Excused">{r.excused}</td>
-                  <td data-label="Attendance">
-                    <div className="row-between small">
-                      <strong>
-                        {r.percentage ?? '—'}
-                        {r.percentage != null && '%'}
-                      </strong>
-                      {r.belowThreshold && <Badge tone="danger">Below {data.threshold}%</Badge>}
-                    </div>
-                    <ProgressBar value={r.percentage} threshold={data.threshold} label={`${fullName(r.student)} attendance`} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {body}
     </Card>
   );
 }
 
-/* ------------------------------------------------------------------ corrections list (all roles) */
+/**
+ * List of correction requests. Staff see everyone's requests (pending first) and can approve or
+ * reject them; students only see their own.
+ */
 function Corrections({ staff }: any) {
-  const status = staff ? 'pending' : '';
-  const list = useListQuery('/attendance/corrections', { limit: 10, initialFilters: { status } });
+  const defaultStatus = staff ? 'pending' : '';
+  const list = useListQuery('/attendance/corrections', { limit: 10, initialFilters: { status: defaultStatus } });
   const [reviewing, setReviewing] = useState(null);
 
   const review = async (values) => {
@@ -381,23 +421,36 @@ function Corrections({ staff }: any) {
   );
 }
 
-/* ------------------------------------------------------------------ student / parent */
+/** View for students and parents: summary, daily history and correction requests. */
 function StudentAttendance() {
   const { user } = useAuth();
   const isParent = user.role === 'parent';
   const kids = useFetch('/students', { limit: 50 }, { enabled: isParent });
   const [kid, setKid] = useState('');
+  // Students use the special id 'me'; parents use the selected child (first child by default).
   const studentId = isParent ? kid || kids.data?.[0]?._id : 'me';
   const [tab, setTab] = useState('summary');
   const [range, setRange] = useState({ from: '', to: '', subject: '' });
   const [page, setPage] = useState(1);
   const hist = useFetch(
     `/attendance/student/${studentId}/history`,
-    { page, limit: 20, ...Object.fromEntries(Object.entries(range).filter(([, v]) => v)) },
+    {
+      page,
+      limit: 20,
+      ...(range.subject && { subject: range.subject }),
+      ...(range.from && { from: range.from }),
+      ...(range.to && { to: range.to }),
+    },
     { enabled: !!studentId && tab === 'history' }
   );
   const summary = useFetch(`/attendance/student/${studentId}/summary`, undefined, { enabled: !!studentId });
   const [correcting, setCorrecting] = useState(null);
+
+  // Change one filter and go back to the first page of results.
+  const changeFilter = (name: string, value: string) => {
+    setRange({ ...range, [name]: value });
+    setPage(1);
+  };
 
   const submitCorrection = async (v) => {
     await api.post('/attendance/corrections', { attendance: correcting._id, requestedStatus: v.requestedStatus, reason: v.reason });
@@ -443,10 +496,7 @@ function StudentAttendance() {
               className="select"
               aria-label="Subject"
               value={range.subject}
-              onChange={(e) => {
-                setRange({ ...range, subject: e.target.value });
-                setPage(1);
-              }}
+              onChange={(e) => changeFilter('subject', e.target.value)}
             >
               <option value="">All subjects</option>
               {summary.data?.subjects.map((s) => (
@@ -461,10 +511,7 @@ function StudentAttendance() {
               type="date"
               aria-label="From date"
               value={range.from}
-              onChange={(e) => {
-                setRange({ ...range, from: e.target.value });
-                setPage(1);
-              }}
+              onChange={(e) => changeFilter('from', e.target.value)}
             />
             <input
               className="input"
@@ -472,10 +519,7 @@ function StudentAttendance() {
               type="date"
               aria-label="To date"
               value={range.to}
-              onChange={(e) => {
-                setRange({ ...range, to: e.target.value });
-                setPage(1);
-              }}
+              onChange={(e) => changeFilter('to', e.target.value)}
             />
           </div>
           <DataTable
@@ -520,7 +564,7 @@ function StudentAttendance() {
                 label: 'Should be',
                 type: 'select',
                 required: true,
-                options: STATUS.filter((s) => s !== correcting.status).map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
+                options: STATUS.filter((s) => s !== correcting.status).map((s) => ({ value: s, label: capitalize(s) })),
               },
               {
                 name: 'reason',
@@ -541,7 +585,7 @@ function StudentAttendance() {
   );
 }
 
-/* ------------------------------------------------------------------ entry */
+/** Staff get the three-tab view; students and parents get their own view. */
 export default function Attendance() {
   const { user } = useAuth();
   const [tab, setTab] = useState('mark');

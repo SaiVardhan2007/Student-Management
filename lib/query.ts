@@ -1,3 +1,4 @@
+// Helpers for building MongoDB queries: id checks, pagination, sorting, search and filters.
 import mongoose from 'mongoose';
 import { AppError } from './errors';
 
@@ -29,11 +30,13 @@ export const pageMeta = (page: number, limit: number, total: number) => ({ page,
 
 /** Parse `?sort=field` / `?sort=-field` restricted to an allow list. */
 export function parseSort(sort: unknown, allowed: string[], fallback: Record<string, any> = { createdAt: -1 }) {
-  if (!sort || typeof sort !== 'string') return fallback;
+  // _id tiebreak keeps pages stable (no skipped/duplicated rows when the sort field has equal values)
+  const stable = (s: Record<string, any>) => ('_id' in s ? s : { ...s, _id: 1 });
+  if (!sort || typeof sort !== 'string') return stable(fallback);
   const desc = sort.startsWith('-');
   const field = desc ? sort.slice(1) : sort;
-  if (!allowed.includes(field)) return fallback;
-  return { [field]: desc ? -1 : 1, _id: 1 };
+  if (!allowed.includes(field)) return stable(fallback);
+  return stable({ [field]: desc ? -1 : 1 });
 }
 
 export type PaginateOptions = {

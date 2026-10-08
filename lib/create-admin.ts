@@ -1,3 +1,4 @@
+// Creates the first admin account. Called by scripts/create-admin.ts.
 import { User, Settings } from '@/models';
 import { passwordProblem } from '@/validators/common';
 

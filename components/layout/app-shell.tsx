@@ -1,5 +1,8 @@
 'use client';
 
+// The signed-in layout: sidebar, top bar (breadcrumbs, notifications, user menu) and a role check.
+// Wraps every dashboard page.
+
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -13,38 +16,55 @@ import { useDismiss, useFetch } from '@/hooks';
 import { api, fetchImageUrl } from '@/lib/api-client';
 import { fmtDateTime, titleCase } from '@/lib/format';
 
+/** College logo. The image is protected, so it is fetched with the auth header and shown from a temporary blob URL. */
 function Logo({ logo }: any) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
-    let url;
-    if (logo)
+    let blobUrl;
+    if (logo) {
       fetchImageUrl(logo)
-        .then((u) => {
-          url = u;
-          setSrc(u);
+        .then((url) => {
+          blobUrl = url;
+          setSrc(url);
         })
         .catch(() => setSrc(null));
-    return () => url && URL.revokeObjectURL(url);
+    }
+    // Free the blob URL when the logo changes or the component goes away
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
   }, [logo]);
-  return <span className="brand-logo">{src ? <img src={src} alt="" /> : <Icon name="graduation" size={18} />}</span>;
+  return (
+    <span className="brand-logo">
+      {/* src is a short-lived blob: URL of a protected file; next/image cannot optimise those */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {src ? <img src={src} alt="" /> : <Icon name="graduation" size={18} />}
+    </span>
+  );
 }
 
+/** Home > Section > Page trail built from the current URL. */
 function Breadcrumbs() {
   const pathname = usePathname();
   const parts = pathname.split('/').filter(Boolean);
-  const crumbs: { to: string; label: string; current?: boolean }[] = [{ to: '/', label: 'Home' }];
-  let acc = '';
-  parts.forEach((p, i) => {
-    acc += `/${p}`;
-    const label = TITLES[p] || (/^[a-f\d]{24}$/i.test(p) ? 'Details' : titleCase(p));
-    crumbs.push({ to: acc, label, current: i === parts.length - 1 });
-  });
-  if (parts.length === 0)
+  if (parts.length === 0) {
     return (
       <span className="crumbs">
         <span className="current">Dashboard</span>
       </span>
     );
+  }
+
+  const crumbs: { to: string; label: string; current?: boolean }[] = [{ to: '/', label: 'Home' }];
+  let path = '';
+  parts.forEach((part, index) => {
+    path += `/${part}`;
+    // A 24-character hex segment is a MongoDB id, so show "Details" instead of the id
+    const looksLikeId = /^[a-f\d]{24}$/i.test(part);
+    const label = TITLES[part] || (looksLikeId ? 'Details' : titleCase(part));
+    crumbs.push({ to: path, label, current: index === parts.length - 1 });
+  });
+
   return (
     <nav className="crumbs" aria-label="Breadcrumb">
       {crumbs.map((c, i) => (
@@ -63,6 +83,7 @@ function Breadcrumbs() {
   );
 }
 
+/** Bell icon with an unread count and a dropdown of the latest notifications. */
 function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -72,10 +93,10 @@ function NotificationBell() {
   const router = useRouter();
   const navigate = (to: string) => router.push(to);
 
-  // light polling so new notifications show up without a reload
+  // Check for new notifications every minute so the count updates without a page reload
   useEffect(() => {
-    const t = setInterval(count.reload, 60000);
-    return () => clearInterval(t);
+    const timer = setInterval(count.reload, 60000);
+    return () => clearInterval(timer);
   }, [count.reload]);
 
   const openItem = async (n) => {
@@ -140,6 +161,7 @@ function NotificationBell() {
   );
 }
 
+/** Name/avatar button with a dropdown for profile, notifications and sign out. */
 function UserMenu() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
@@ -198,26 +220,38 @@ function UserMenu() {
   );
 }
 
+/** Layout for signed-in pages. Redirects to login when there is no session and blocks pages the role may not open. */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  // Close the mobile menu after navigating
   useEffect(() => setOpen(false), [pathname]);
+  // Move keyboard focus to the page content after navigating (for screen readers)
   useEffect(() => {
     document.getElementById('main-content')?.focus({ preventScroll: true });
   }, [pathname]);
 
-  // signed-out visitors (expired session) go to the sign-in page, remembering where they were
+  // Signed-out visitors (e.g. expired session) go to login and come back to this page afterwards
   useEffect(() => {
     if (!loading && !user) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
   }, [loading, user, router, pathname]);
   if (loading || !user) return <PageLoader label="Restoring your session…" />;
 
   const allowed = canAccessPath(user.role, pathname);
-  const isActive = (i: { href: string; end?: boolean }) => (i.end ? pathname === i.href : pathname === i.href || pathname.startsWith(i.href + '/'));
-  const groups = NAV.map((g) => ({ ...g, items: g.items.filter((i) => i.roles.includes(user.role)) })).filter((g) => g.items.length);
+
+  // A menu item is active on its own page and (unless item.end is set) on its sub-pages
+  const isActive = (item: { href: string; end?: boolean }) => {
+    if (item.end) return pathname === item.href;
+    return pathname === item.href || pathname.startsWith(item.href + '/');
+  };
+
+  // Only show the menu items this user's role may open, and drop empty groups
+  const groups = NAV.map((group) => ({ ...group, items: group.items.filter((item) => item.roles.includes(user.role)) })).filter(
+    (group) => group.items.length > 0
+  );
 
   return (
     <div className="app">

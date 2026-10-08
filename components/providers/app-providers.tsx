@@ -1,5 +1,7 @@
 'use client';
 
+// Wraps the whole app (used in app/layout.tsx).
+
 import { Toaster } from 'react-hot-toast';
 import { ConfirmProvider } from './confirm-provider';
 

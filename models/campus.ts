@@ -1,12 +1,16 @@
+// MongoDB collections (Mongoose models) for campus life: notices, notifications, materials, calendar, documents,
+// complaints, achievements, the audit log and settings.
 import mongoose from 'mongoose';
 import { registerModel } from './register';
 import { fileSchema } from './academics-ops';
 
 const { Schema } = mongoose;
+// Shortcut for a field that stores the _id of a document in another collection.
 const oid = (ref, extra = {}) => ({ type: Schema.Types.ObjectId, ref, ...extra });
 
 export const NOTICE_AUDIENCES = ['all', 'students', 'faculty', 'parents'];
 
+// An announcement. Department/program/year/section optionally narrow who it is for.
 const noticeSchema = new Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 200 },
@@ -20,6 +24,7 @@ const noticeSchema = new Schema(
     publishDate: { type: Date, default: Date.now, index: true },
     expiryDate: Date,
     attachment: fileSchema,
+    announcedAt: Date, // set once the notification fan-out has been sent
     createdBy: oid('User', { required: true }),
   },
   { timestamps: true }
@@ -27,6 +32,7 @@ const noticeSchema = new Schema(
 noticeSchema.index({ publishDate: -1, expiryDate: 1 });
 export const Notice = registerModel('Notice', noticeSchema);
 
+// A short message shown to one user (bell icon).
 const notificationSchema = new Schema(
   {
     user: oid('User', { required: true }),
@@ -48,6 +54,7 @@ export const Notification = registerModel('Notification', notificationSchema);
 
 export const MATERIAL_TYPES = ['notes', 'pdf', 'assignment', 'question_paper', 'reference'];
 
+// A study file uploaded for a subject.
 const materialSchema = new Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 200 },
@@ -61,6 +68,7 @@ const materialSchema = new Schema(
 );
 export const Material = registerModel('Material', materialSchema);
 
+// An entry on the academic calendar (holiday, seminar, deadline ...).
 const calendarSchema = new Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 200 },
@@ -81,6 +89,7 @@ export const CalendarEvent = registerModel('CalendarEvent', calendarSchema);
 
 export const DOC_STATUSES = ['pending', 'verified', 'rejected', 'reupload_requested'];
 
+// A certificate or ID file uploaded by a student, to be checked by the admin.
 const documentSchema = new Schema(
   {
     student: oid('Student', { required: true, index: true }),
@@ -102,6 +111,7 @@ export const StudentDocument = registerModel('StudentDocument', documentSchema);
 
 export const COMPLAINT_STATUSES = ['open', 'assigned', 'in_progress', 'resolved', 'closed'];
 
+// A complaint raised by a student, with the replies from staff.
 const complaintSchema = new Schema(
   {
     student: oid('Student', { required: true, index: true }),
@@ -130,6 +140,7 @@ const complaintSchema = new Schema(
 );
 export const Complaint = registerModel('Complaint', complaintSchema);
 
+// A student's achievement (hackathon, certificate ...) waiting for verification.
 const achievementSchema = new Schema(
   {
     student: oid('Student', { required: true, index: true }),
@@ -150,6 +161,7 @@ const achievementSchema = new Schema(
 );
 export const Achievement = registerModel('Achievement', achievementSchema);
 
+// One row per important action, for tracking who did what. Never updated, so no timestamps/version key.
 const auditSchema = new Schema(
   {
     user: oid('User', { index: true }),
@@ -166,6 +178,7 @@ const auditSchema = new Schema(
 );
 export const AuditLog = registerModel('AuditLog', auditSchema);
 
+// Grade scale used until the admin changes it: a student with at least minPercent gets that grade.
 const DEFAULT_GRADES = [
   { grade: 'O', minPercent: 90, points: 10 },
   { grade: 'A+', minPercent: 80, points: 9 },
@@ -176,12 +189,14 @@ const DEFAULT_GRADES = [
   { grade: 'F', minPercent: 0, points: 0 },
 ];
 
+// College-wide settings. Only one row exists; its key is always 'main'.
 const settingsSchema = new Schema(
   {
     key: { type: String, default: 'main', unique: true },
     collegeName: { type: String, default: 'My College' },
     logo: String,
     contact: { email: String, phone: String, address: String, website: String },
+    // Minimum attendance percentage a student must keep.
     attendanceThreshold: { type: Number, default: 75, min: 0, max: 100 },
     passPercentage: { type: Number, default: 40, min: 0, max: 100 },
     gradeScale: { type: [{ grade: String, minPercent: Number, points: Number, _id: false }], default: DEFAULT_GRADES },

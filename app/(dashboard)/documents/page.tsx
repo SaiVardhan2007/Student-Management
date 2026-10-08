@@ -1,5 +1,9 @@
 'use client';
 
+// Documents. Students upload certificates/IDs and can delete unverified ones. Admin reviews each
+// document (verify, reject or ask for re-upload) and can delete any. Parents can only view.
+// API: /documents
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -41,16 +45,16 @@ export default function Documents() {
     setUpload(false);
     list.reload();
   };
+  const canDelete = (d) => isAdmin || (isStudent && d.status !== 'verified');
+
   const remove = async (d) => {
-    if (
-      !(await confirm({
-        title: 'Delete document?',
-        message: `"${d.title}" will be permanently deleted.`,
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
-    )
-      return;
+    const ok = await confirm({
+      title: 'Delete document?',
+      message: `"${d.title}" will be permanently deleted.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.delete(`/documents/${d._id}`);
       toast.success('Document deleted');
@@ -151,9 +155,7 @@ export default function Documents() {
                   Review
                 </Button>
               )}
-              {(isAdmin || (isStudent && d.status !== 'verified')) && (
-                <RowAction icon="trash" danger label="Delete document" onClick={() => remove(d)} />
-              )}
+              {canDelete(d) && <RowAction icon="trash" danger label="Delete document" onClick={() => remove(d)} />}
             </>
           )}
         />
@@ -220,6 +222,7 @@ export default function Documents() {
                 span2: true,
                 maxLength: 500,
                 hint: 'Required when rejecting or requesting a re-upload',
+                // `all` holds every form value, so we can check the chosen decision.
                 validate: (v, all) => (all.status !== 'verified' && !v ? 'Please add a note explaining the decision' : null),
               },
             ]}

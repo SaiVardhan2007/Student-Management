@@ -1,3 +1,4 @@
+// Login tokens (JWT), auth cookies, and loading the signed-in user for each API request.
 import crypto from 'crypto';
 import { SignJWT, jwtVerify, errors as joseErrors } from 'jose';
 import { env } from './env';
@@ -8,12 +9,11 @@ import { User, Student, Faculty } from '@/models';
 import type { ApiResult } from './response';
 
 import { ACCESS_COOKIE, REFRESH_COOKIE } from './cookie-names';
-export { ACCESS_COOKIE, REFRESH_COOKIE };
+export { ACCESS_COOKIE, REFRESH_COOKIE }; // re-exported so other files can import everything auth-related from here
 const REFRESH_PATH = '/api/auth';
 
 const key = (s: string) => new TextEncoder().encode(s);
 
-// ---------------------------------------------------------------- tokens
 export const signAccessToken = (user: any) =>
   new SignJWT({ role: user.role, pca: user.passwordChangedAt?.getTime() ?? 0 })
     .setProtectedHeader({ alg: 'HS256' })
@@ -46,9 +46,9 @@ export async function verifyRefreshToken(token: string) {
   }
 }
 
+/** Hash used to store reset/refresh tokens in the database instead of the raw value. */
 export const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
-// ---------------------------------------------------------------- cookies
 const cookieBase = (path: string) => ({ httpOnly: true, sameSite: 'strict' as const, secure: env.cookieSecure, path });
 
 /** Browser transport: both tokens travel in httpOnly cookies. API clients (no header) get tokens in the JSON body. */
@@ -68,6 +68,7 @@ export function clearAuthCookies(result: ApiResult) {
   return result;
 }
 
+/** Reads one cookie value from the raw Cookie header. */
 export function readCookie(request: Request, name: string): string | undefined {
   const header = request.headers.get('cookie');
   if (!header) return undefined;
@@ -84,7 +85,6 @@ export function readCookie(request: Request, name: string): string | undefined {
   return undefined;
 }
 
-// ---------------------------------------------------------------- authentication
 /** Loads the (active) user a verified access token belongs to. */
 export async function userFromToken(token: string) {
   const payload = await verifyAccessToken(token);

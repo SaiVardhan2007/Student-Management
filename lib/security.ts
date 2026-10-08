@@ -1,3 +1,4 @@
+// Request-safety check against MongoDB operator injection.
 /**
  * Reject Mongo operator injection: any key containing "$" or "." in the body, query or params
  * is refused with a 400 instead of being silently dropped, so clients learn about the mistake.

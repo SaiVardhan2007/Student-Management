@@ -1,13 +1,18 @@
+// MongoDB collections (Mongoose models) for day-to-day teaching: attendance, marks, exams, assignments and the
+// timetable.
 import mongoose from 'mongoose';
 import { registerModel } from './register';
 
 const { Schema } = mongoose;
+// Shortcut for a field that stores the _id of a document in another collection.
 const oid = (ref, extra = {}) => ({ type: Schema.Types.ObjectId, ref, ...extra });
 
+// Details of an uploaded file. Embedded inside other documents, so it has no _id of its own.
 export const fileSchema = new Schema({ path: String, originalName: String, mimeType: String, size: Number }, { _id: false });
 
 export const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused'];
 
+// One row per student per subject per day.
 const attendanceSchema = new Schema(
   {
     subject: oid('Subject', { required: true }),
@@ -22,11 +27,13 @@ const attendanceSchema = new Schema(
   },
   { timestamps: true }
 );
+// A student can have only one attendance row for a subject on a given date.
 attendanceSchema.index({ subject: 1, student: 1, date: 1 }, { unique: true });
 attendanceSchema.index({ student: 1, date: -1 });
 attendanceSchema.index({ subject: 1, section: 1, date: 1 });
 export const Attendance = registerModel('Attendance', attendanceSchema);
 
+// A student's request to change one attendance row; a teacher approves or rejects it.
 const correctionSchema = new Schema(
   {
     attendance: oid('Attendance', { required: true }),
@@ -45,6 +52,7 @@ export const AttendanceCorrection = registerModel('AttendanceCorrection', correc
 
 export const MARK_TYPES = ['assignment', 'quiz', 'internal', 'practical', 'mid', 'final'];
 
+// One row per student per subject per exam type (quiz, mid, final ...).
 const markSchema = new Schema(
   {
     student: oid('Student', { required: true }),
@@ -59,11 +67,13 @@ const markSchema = new Schema(
   },
   { timestamps: true }
 );
+// Only one mark per student, subject and exam type.
 markSchema.index({ student: 1, subject: 1, examType: 1 }, { unique: true });
 markSchema.index({ subject: 1, examType: 1 });
 markSchema.index({ student: 1, semester: 1 });
 export const Mark = registerModel('Mark', markSchema);
 
+// A scheduled exam for a subject. startTime/endTime are 'HH:mm' text.
 const examSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -84,6 +94,7 @@ const examSchema = new Schema(
 );
 export const Exam = registerModel('Exam', examSchema);
 
+// Homework posted by a teacher for a subject.
 const assignmentSchema = new Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 200 },
@@ -100,6 +111,7 @@ const assignmentSchema = new Schema(
 );
 export const Assignment = registerModel('Assignment', assignmentSchema);
 
+// One row per student per assignment: their answer and, later, the marks.
 const submissionSchema = new Schema(
   {
     assignment: oid('Assignment', { required: true }),
@@ -121,6 +133,7 @@ export const Submission = registerModel('Submission', submissionSchema);
 
 export const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
+// One class slot: a subject taught by a faculty member to a section, in a room, on a weekday.
 const timetableSchema = new Schema(
   {
     day: { type: String, enum: DAYS, required: true },

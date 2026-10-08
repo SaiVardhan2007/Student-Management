@@ -1,12 +1,22 @@
 'use client';
 
+// Academic setup (admin only): tabs to manage departments, programs, academic years, semesters
+// and sections. Each tab is just a config object handed to the shared ResourcePage component,
+// which builds the list, create/edit form and delete. APIs: /departments, /programs,
+// /academic-years, /semesters, /sections
+
 import { useState } from 'react';
 import ResourcePage from '@/components/ui/resource-page';
 import { Badge, Tabs } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { SEMESTERS } from '@/lib/constants';
 
+// Shared 'Active' checkbox field and status badge used by several tabs.
 const active = { name: 'isActive', label: 'Active', type: 'checkbox', checkboxLabel: 'Active' };
+
+function ActiveBadge({ isActive }) {
+  return <Badge tone={isActive ? 'success' : 'danger'}>{isActive ? 'Active' : 'Inactive'}</Badge>;
+}
 
 const DEPARTMENTS = {
   title: 'Departments',
@@ -35,7 +45,7 @@ const DEPARTMENTS = {
     {
       key: 'isActive',
       label: 'Status',
-      render: (r) => <Badge tone={r.isActive ? 'success' : 'danger'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
+      render: (r) => <ActiveBadge isActive={r.isActive} />,
     },
   ],
 };
@@ -65,7 +75,7 @@ const PROGRAMS = {
     {
       key: 'isActive',
       label: 'Status',
-      render: (r) => <Badge tone={r.isActive ? 'success' : 'danger'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
+      render: (r) => <ActiveBadge isActive={r.isActive} />,
     },
   ],
 };
@@ -135,6 +145,7 @@ const SECTIONS = {
       type: 'select',
       required: true,
       optionsUrl: '/programs',
+      // Only show programs that belong to the department chosen above.
       filterOptions: (o, v) => (v.department ? o.filter((x) => (x.raw.department?._id || x.raw.department) === v.department) : o),
     },
     { name: 'batch', label: 'Batch', placeholder: '2025' },
@@ -151,7 +162,7 @@ const SECTIONS = {
     {
       key: 'isActive',
       label: 'Status',
-      render: (r) => <Badge tone={r.isActive ? 'success' : 'danger'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
+      render: (r) => <ActiveBadge isActive={r.isActive} />,
     },
   ],
 };
@@ -166,11 +177,12 @@ const TABS = [
 
 export default function AcademicSetup() {
   const [tab, setTab] = useState('departments');
-  const cur = TABS.find((t) => t.value === tab);
+  const current = TABS.find((t) => t.value === tab);
   return (
     <div className="stack">
       <Tabs tabs={TABS} value={tab} onChange={setTab} />
-      <ResourcePage key={tab} {...cur.cfg} />
+      {/* key makes React reset the page state when the tab changes */}
+      <ResourcePage key={tab} {...current.cfg} />
     </div>
   );
 }

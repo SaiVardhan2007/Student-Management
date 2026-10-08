@@ -1,10 +1,14 @@
+// Zod schemas that check request data for documents, complaints, achievements, fees, placements, the library
+// and settings before the services run.
 import { z, objectId, dateField, optionalDate, optionalPhone } from '@/validators/common';
 import { COMPLAINT_STATUSES } from '@/models/campus';
 import { APPLICATION_STATUSES } from '@/models/extras';
 
 // ---- exams
+// Settings for generating the seating plan: seats per room and the seat-number prefix.
 export const seatingSchema = z.object({
-  perRoomCapacity: z.coerce.number().int().min(1).max(1000).default(60),
+  // optional: without it everyone sits in one hall; a smaller capacity spreads the class over several rooms
+  perRoomCapacity: z.preprocess((v) => (v === '' || v === null ? undefined : v), z.coerce.number().int().min(1).max(1000).optional()),
   prefix: z.string().trim().max(5).default('S'),
 });
 
@@ -15,6 +19,7 @@ export const documentUploadSchema = z.object({
 });
 export const documentReviewSchema = z
   .object({ status: z.enum(['verified', 'rejected', 'reupload_requested']), reviewNote: z.string().trim().max(500).optional() })
+  // Rejecting or asking for a re-upload needs a note so the student knows why.
   .refine((d) => d.status === 'verified' || d.reviewNote, { message: 'Please add a note explaining the decision', path: ['reviewNote'] });
 
 // ---- complaints
@@ -52,6 +57,24 @@ export const feePaySchema = z.object({
   amount: z.coerce.number().positive(),
   method: z.enum(['cash', 'card', 'upi', 'netbanking', 'simulated']).default('simulated'),
 });
+// admin sets what one student owes
+export const feeCreateSchema = z.object({
+  student: objectId,
+  title: z.string().trim().min(2).max(150),
+  amountDue: z.coerce.number().positive().max(10000000),
+  dueDate: dateField,
+});
+export const feeUpdateSchema = z.object({
+  title: z.string().trim().min(2).max(150).optional(),
+  amountDue: z.coerce.number().positive().max(10000000).optional(),
+  dueDate: dateField.optional(),
+});
+export const razorpayOrderSchema = z.object({ amount: z.coerce.number().positive() });
+export const razorpayVerifySchema = z.object({
+  razorpay_order_id: z.string().min(1).max(100),
+  razorpay_payment_id: z.string().min(1).max(100),
+  razorpay_signature: z.string().min(1).max(200),
+});
 
 // ---- placements
 export const companySchema = z.object({
@@ -85,13 +108,14 @@ export const bookSchema = z.object({
   isbn: z
     .string()
     .trim()
-    .regex(/^[0-9Xx-]{10,17}$/, 'ISBN must be 10–13 digits'),
+    .regex(/^[0-9Xx-]{10,17}$/, 'ISBN must be 10–13 digits'), // up to 17 characters allows hyphens
   category: z.string().trim().max(80).optional(),
   totalCopies: z.coerce.number().int().min(1).max(10000),
 });
 export const issueBookSchema = z.object({ book: objectId, student: objectId });
 
 // ---- settings
+// Grade scale rules: at least two grades, one starting at 0%, and no two grades with the same boundary.
 const gradeScale = z
   .array(
     z.object({

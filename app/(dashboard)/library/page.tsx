@@ -1,5 +1,9 @@
 'use client';
 
+// Library. Admin manages the book catalogue, issues books to students and marks them returned.
+// Students see the catalogue and their own borrowing history; other roles see the history only.
+// APIs: /library/books, /library/issue, /library/issues, /library/return/:id
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -12,6 +16,7 @@ import { Badge, Button, Card, EmptyState, Modal, PageHeader, Tabs } from '@/comp
 import { useConfirm } from '@/components/providers/confirm-provider';
 import { fmtDate, fmtMoney, fullName } from '@/lib/format';
 
+/** Catalogue tab. Only admin can add, edit, delete and issue books. */
 function Books({ admin }: any) {
   const [issuing, setIssuing] = useState(null);
   const book = {
@@ -30,6 +35,7 @@ function Books({ admin }: any) {
           { name: 'totalCopies', label: 'Total copies', type: 'number', min: 1, required: true },
         ]
       : [],
+    // The form edits authors as one comma-separated text; the API wants an array.
     toForm: (b) => ({
       title: b.title,
       authors: b.authors.join(', '),
@@ -98,18 +104,17 @@ function Books({ admin }: any) {
   );
 }
 
+/** Borrowing history. Admin sees everyone's and can mark books as returned. */
 function Issues({ admin }: any) {
   const list = useListQuery('/library/issues', { limit: 15, initialFilters: { status: 'active' } });
   const confirm = useConfirm();
-  const ret = async (i) => {
-    if (
-      !(await confirm({
-        title: 'Return book?',
-        message: `Mark "${i.book?.title}" as returned${i.overdue ? ` (fine ${fmtMoney(i.currentFine)} applies)` : ''}.`,
-        confirmLabel: 'Return',
-      }))
-    )
-      return;
+  const markReturned = async (i) => {
+    const ok = await confirm({
+      title: 'Return book?',
+      message: `Mark "${i.book?.title}" as returned${i.overdue ? ` (fine ${fmtMoney(i.currentFine)} applies)` : ''}.`,
+      confirmLabel: 'Return',
+    });
+    if (!ok) return;
     try {
       const r = await api.post(`/library/return/${i._id}`);
       toast.success(r.data.message);
@@ -160,7 +165,7 @@ function Issues({ admin }: any) {
           admin
             ? (i) =>
                 !i.returnedAt && (
-                  <Button size="sm" onClick={() => ret(i)}>
+                  <Button size="sm" onClick={() => markReturned(i)}>
                     Return
                   </Button>
                 )

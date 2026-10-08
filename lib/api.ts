@@ -1,3 +1,4 @@
+// route(): the wrapper every API route uses. It handles rate limiting, login, roles, body parsing, validation and error responses.
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
@@ -36,6 +37,7 @@ type Handler = (ctx: Ctx) => Promise<ApiResult | Response> | ApiResult | Respons
 
 const MAX_JSON_BYTES = 1024 * 1024;
 
+/** The caller's IP, used as the rate-limit key. X-Forwarded-For is only trusted for the number of proxies set in TRUST_PROXY. */
 export function clientIp(request: Request): string {
   const xff = request.headers.get('x-forwarded-for');
   if (xff) {
@@ -46,6 +48,14 @@ export function clientIp(request: Request): string {
   return request.headers.get('x-real-ip') || 'unknown';
 }
 
+/** Adds a value under `key`; repeated keys (e.g. ?id=1&id=2) become an array. */
+function addValue(target: Record<string, any>, key: string, value: string) {
+  if (!(key in target)) target[key] = value;
+  else if (Array.isArray(target[key])) target[key].push(value);
+  else target[key] = [target[key], value];
+}
+
+/** Reads the request body as { fields, files } for JSON, form-urlencoded or multipart requests. */
 async function readBody(request: Request, upload?: UploadSpec) {
   const method = request.method.toUpperCase();
   if (method === 'GET' || method === 'HEAD') return { fields: {}, files: [] as any[] };
@@ -59,7 +69,7 @@ async function readBody(request: Request, upload?: UploadSpec) {
   if (!text.trim()) return { fields: {}, files: [] };
   if (type.includes('application/x-www-form-urlencoded')) {
     const out: Record<string, any> = {};
-    for (const [k, v] of new URLSearchParams(text)) out[k] = k in out ? [].concat(out[k], v as any) : v;
+    for (const [k, v] of new URLSearchParams(text)) addValue(out, k, v);
     return { fields: out, files: [] };
   }
   try {
@@ -72,7 +82,7 @@ async function readBody(request: Request, upload?: UploadSpec) {
 
 function queryObject(request: Request) {
   const out: Record<string, any> = {};
-  for (const [k, v] of new URL(request.url).searchParams) out[k] = k in out ? [].concat(out[k], v as any) : v;
+  for (const [k, v] of new URL(request.url).searchParams) addValue(out, k, v);
   return out;
 }
 
@@ -145,7 +155,7 @@ export function route(opts: RouteOptions, handler: Handler) {
       const ctx: Ctx = { request, user: undefined, params, query: queryObject(request), body: {}, files: [], ip, requestId };
 
       if (!opts.public) {
-        // cookie sessions are same-site only: refuse cross-origin state-changing requests outright
+        // CSRF protection: refuse state-changing requests that come from another website
         const origin = request.headers.get('origin');
         const host = request.headers.get('host');
         if (origin && host && request.method !== 'GET' && !request.headers.get('authorization')) {

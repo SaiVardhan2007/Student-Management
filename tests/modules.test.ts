@@ -468,7 +468,7 @@ describe('bulk import', () => {
       .send({ importId: prev.body.data.importId });
     expect(conf.status).toBe(201);
     expect(conf.body.data.created).toHaveLength(1);
-    expect(conf.body.data.created[0].temporaryPassword).toBeTruthy();
+    expect(conf.body.data.created[0].temporaryPassword).toBeUndefined(); // students sign up themselves
     expect(await Student.countDocuments({ studentId: 'S700' })).toBe(1);
     expect(
       (await request(app).post('/api/import/students/confirm').set(A(fx.tokens.admin)).send({ importId: prev.body.data.importId })).status
@@ -501,14 +501,16 @@ describe('fees, library, placements, reports, dashboards', () => {
     const fees = await request(app).get('/api/fees').set(A(stu1));
     expect(fees.body.data).toHaveLength(1);
     const id = fees.body.data[0]._id;
-    expect((await request(app).post(`/api/fees/${id}/pay`).set(A(stu1)).send({ amount: 2000 })).status).toBe(400);
-    const pay = await request(app).post(`/api/fees/${id}/pay`).set(A(stu1)).send({ amount: 400 });
+    // students no longer record payments themselves; they pay through Razorpay
+    expect((await request(app).post(`/api/fees/${id}/pay`).set(A(stu1)).send({ amount: 400 })).status).toBe(403);
+    expect((await request(app).post(`/api/fees/${id}/pay`).set(A(fx.tokens.admin)).send({ amount: 2000, method: 'cash' })).status).toBe(400);
+    const pay = await request(app).post(`/api/fees/${id}/pay`).set(A(fx.tokens.admin)).send({ amount: 400, method: 'cash' });
     expect(pay.body.data.receiptNo).toMatch(/^RCT-/);
     expect((await request(app).get('/api/fees').set(A(stu1))).body.data[0]).toMatchObject({ amountPending: 600, status: 'partial' });
     const other = (await request(app).get('/api/fees').set(A(fx.tokens.admin))).body.data.find(
       (f) => String(f.student._id) !== String(fx.students[0]._id)
     );
-    expect((await request(app).post(`/api/fees/${other._id}/pay`).set(A(stu1)).send({ amount: 10 })).status).toBe(404);
+    expect((await request(app).post(`/api/fees/${other._id}/razorpay/order`).set(A(stu1)).send({ amount: 10 })).status).toBe(404);
     expect((await request(app).get(`/api/fees/${id}/receipt/${pay.body.data.receiptNo}`).set(A(stu1))).status).toBe(200);
     expect((await request(app).get('/api/fees?status=partial').set(A(fx.tokens.admin))).body.data).toHaveLength(1);
   });

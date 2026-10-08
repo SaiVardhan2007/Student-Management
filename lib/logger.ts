@@ -1,3 +1,4 @@
+// Tiny console logger. Silent during tests; prints JSON lines in production.
 const quiet = process.env.NODE_ENV === 'test';
 const json = process.env.NODE_ENV === 'production' || process.env.LOG_FORMAT === 'json';
 

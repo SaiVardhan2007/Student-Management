@@ -1,5 +1,7 @@
 'use client';
 
+// Lets any component ask "Are you sure?" with await confirm(...) instead of managing dialog state itself.
+
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { ConfirmDialog } from '@/components/ui';
 
@@ -7,7 +9,9 @@ const ConfirmContext = createContext<(opts: any) => Promise<boolean>>(() => Prom
 
 /** Usage: const confirm = useConfirm(); if (await confirm({ message, danger: true })) { ... } */
 export function ConfirmProvider({ children }: any) {
+  // Options of the dialog currently shown (null means no dialog)
   const [state, setState] = useState(null);
+  // The resolve function of the pending promise, called when the user answers
   const resolver = useRef(null);
 
   const confirm = useCallback(

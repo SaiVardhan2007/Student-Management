@@ -1,3 +1,4 @@
+// Root layout: wraps every page with the HTML shell, global CSS and app-wide providers.
 import type { Metadata, Viewport } from 'next';
 import AppProviders from '@/components/providers/app-providers';
 import './globals.css';

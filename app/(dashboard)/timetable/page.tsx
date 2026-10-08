@@ -1,5 +1,8 @@
 'use client';
 
+// Timetable. Admin manages class slots (the server rejects faculty, room and section clashes).
+// Faculty, students and parents see a read-only weekly view. Uses /timetable and /timetable/me.
+
 import { useAuth } from '@/components/providers/auth-provider';
 import { useFetch } from '@/hooks';
 import ResourcePage from '@/components/ui/resource-page';
@@ -8,13 +11,15 @@ import { titleCase, fullName } from '@/lib/format';
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((d) => ({ value: d, label: titleCase(d) }));
 
-/** Weekly grid for students / parents / faculty. */
+// Read-only weekly view for students, parents and faculty.
 function MyTimetable() {
   const { user } = useAuth();
   const { data, loading, error, reload } = useFetch('/timetable/me');
   if (loading) return <PageLoader />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
+  // Group the slots by day name, e.g. { monday: [...], tuesday: [...] }
   const byDay = Object.fromEntries(DAYS.map((d) => [d.value, data.filter((s) => s.day === d.value)]));
+  // Weekends are hidden unless they have classes
   const days = DAYS.filter((d) => byDay[d.value].length || !['saturday', 'sunday'].includes(d.value));
   return (
     <div className="page">
@@ -38,6 +43,7 @@ function MyTimetable() {
                     <div>
                       {s.subject?.code} · {s.subject?.name}
                     </div>
+                    {/* Faculty need the section; students and parents need the teacher */}
                     <div className="small muted">
                       {s.room}
                       {user.role === 'faculty' ? ` · Section ${s.section?.name}` : ` · ${s.faculty ? fullName(s.faculty) : ''}`}

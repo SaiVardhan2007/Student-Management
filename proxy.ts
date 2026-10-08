@@ -1,3 +1,4 @@
+// Next.js proxy (middleware): runs before every page request and redirects based on the login cookie and role.
 import { NextResponse, type NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 import { ACCESS_COOKIE } from '@/lib/cookie-names';
@@ -10,6 +11,7 @@ import { canAccessPath, isPublicPath } from '@/lib/permissions';
  *  - a valid session without the role for the page is sent to the dashboard
  * The API never trusts this: every Route Handler re-verifies the token against MongoDB and enforces roles itself.
  */
+// Same default secret as lib/env.ts. This file cannot import env.ts because it runs in the edge runtime.
 const secret = () => new TextEncoder().encode(process.env.JWT_SECRET || 'dev-only-access-secret-do-not-use-in-prod');
 
 export async function proxy(request: NextRequest) {

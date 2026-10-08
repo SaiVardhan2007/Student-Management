@@ -1,5 +1,7 @@
 'use client';
 
+// Reset-password page. The token comes from the emailed link (?token=...).
+
 import { Suspense, useState } from 'react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -11,7 +13,6 @@ import { passwordProblem } from '@/lib/validation';
 function ResetPasswordForm() {
   const params = useSearchParams();
   const router = useRouter();
-  const navigate = (to: string, opts?: { replace?: boolean }) => (opts?.replace ? router.replace(to) : router.push(to));
   const token = params.get('token') || '';
   const [form, setForm] = useState({ newPassword: '', confirm: '' });
   const [errors, setErrors] = useState<any>({});
@@ -21,17 +22,17 @@ function ResetPasswordForm() {
   const submit = async (e) => {
     e.preventDefault();
     const found: Record<string, any> = {};
-    const p = passwordProblem(form.newPassword);
-    if (p) found.newPassword = p;
+    const passwordError = passwordProblem(form.newPassword);
+    if (passwordError) found.newPassword = passwordError;
     if (form.confirm !== form.newPassword) found.confirm = 'Passwords do not match';
     setErrors(found);
-    if (Object.keys(found).length) return;
+    if (Object.keys(found).length > 0) return;
     setBusy(true);
     setError('');
     try {
       await api.post('/auth/reset-password', { token, newPassword: form.newPassword });
       toast.success('Password reset. Please sign in.');
-      navigate('/login', { replace: true });
+      router.replace('/login');
     } catch (err) {
       setErrors(fieldErrors(err));
       setError(errorMessage(err));
@@ -89,6 +90,7 @@ function ResetPasswordForm() {
   );
 }
 
+// useSearchParams needs a Suspense boundary in the Next.js App Router
 export default function ResetPassword() {
   return (
     <Suspense fallback={null}>

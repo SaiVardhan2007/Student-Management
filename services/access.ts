@@ -1,3 +1,5 @@
+// Helpers that decide which subjects / students the logged-in user may see.
+// Services call these before reading or changing data.
 import type { Ctx } from '@/lib/context';
 import { Subject, Enrollment, Student } from '@/models';
 import { facultyProfile, studentProfile } from '@/lib/auth';
@@ -5,8 +7,8 @@ import { AppError } from '@/lib/errors';
 
 /** Subject ids a faculty member teaches. */
 export async function facultySubjectIds(ctx: Ctx) {
-  const f = await facultyProfile(ctx);
-  const subjects = await Subject.find({ faculty: f._id }).select('_id').lean();
+  const faculty = await facultyProfile(ctx);
+  const subjects = await Subject.find({ faculty: faculty._id }).select('_id').lean();
   return subjects.map((s) => s._id);
 }
 
@@ -16,8 +18,8 @@ export async function assertSubjectAccess(ctx: Ctx, subjectId) {
   if (!subject) throw AppError.notFound('Subject not found');
   if (ctx.user.role === 'admin') return subject;
   if (ctx.user.role !== 'faculty') throw AppError.forbidden();
-  const f = await facultyProfile(ctx);
-  if (String(subject.faculty) !== String(f._id)) {
+  const faculty = await facultyProfile(ctx);
+  if (String(subject.faculty) !== String(faculty._id)) {
     throw AppError.forbidden('You are not assigned to this subject');
   }
   return subject;
@@ -25,11 +27,11 @@ export async function assertSubjectAccess(ctx: Ctx, subjectId) {
 
 /** Subject ids visible to a student (their enrolments). */
 export async function studentSubjectIds(ctx: Ctx) {
-  const s = await studentProfile(ctx);
-  const en = await Enrollment.find({ student: s._id, status: { $ne: 'dropped' } })
+  const student = await studentProfile(ctx);
+  const enrollments = await Enrollment.find({ student: student._id, status: { $ne: 'dropped' } })
     .select('subject')
     .lean();
-  return en.map((e) => e.subject);
+  return enrollments.map((e) => e.subject);
 }
 
 /**
@@ -44,12 +46,13 @@ export async function visibleStudentScope(ctx: Ctx) {
   if (role === 'parent') return { ids: ctx.user.children || [] };
   if (role === 'faculty') {
     const subjectIds = await facultySubjectIds(ctx);
-    const ids = await Enrollment.distinct('student', { subject: { $in: subjectIds } });
+    const ids = await Enrollment.distinct('student', { subject: { $in: subjectIds }, status: 'enrolled' });
     return { ids };
   }
   return { ids: [] };
 }
 
+/** Throws unless the user is allowed to access this student. */
 export async function assertStudentAccess(ctx: Ctx, studentId) {
   const scope = await visibleStudentScope(ctx);
   if (scope.all) return;

@@ -1,5 +1,9 @@
 'use client';
 
+// Support tickets (complaints). Students raise tickets and can close their own. Faculty see
+// tickets assigned to them, admin sees all and can assign them. Staff can change the status
+// and everyone involved can reply. API: /complaints (and /users to list who can be assigned)
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -19,6 +23,7 @@ const CATEGORIES = ['academic', 'administrative', 'hostel', 'library', 'fees', '
 const STATUSES = ['open', 'assigned', 'in_progress', 'resolved', 'closed'].map((c) => ({ value: c, label: titleCase(c) }));
 const PRIORITIES = ['low', 'medium', 'high'].map((c) => ({ value: c, label: titleCase(c) }));
 
+/** Modal showing one ticket: details, conversation, reply box and staff controls. */
 function Ticket({ id, onClose, onChanged }: any) {
   const { user } = useAuth();
   const { data: t, loading, error, reload } = useFetch(`/complaints/${id}`);
@@ -26,6 +31,7 @@ function Ticket({ id, onClose, onChanged }: any) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Runs an API call with the busy flag on, shows a message, then refreshes the ticket and the list.
   const act = async (fn, msg) => {
     setBusy(true);
     try {
@@ -39,126 +45,140 @@ function Ticket({ id, onClose, onChanged }: any) {
       setBusy(false);
     }
   };
-  const send = () =>
-    reply.trim() &&
+  const send = () => {
+    if (!reply.trim()) return;
     act(async () => {
       await api.post(`/complaints/${id}/respond`, { message: reply.trim() });
       setReply('');
     }, 'Reply sent');
+  };
   const canStaff = user.role === 'admin' || user.role === 'faculty';
   const closed = t && ['resolved', 'closed'].includes(t.status);
+  // Students cannot reply once the ticket is closed; parents can only read.
+  const canReply = !(closed && user.role === 'student') && user.role !== 'parent';
+
+  let content;
+  if (loading) {
+    content = <PageLoader />;
+  } else if (error) {
+    content = <ErrorState message={error} onRetry={reload} />;
+  } else {
+    content = (
+      <div className="stack">
+        <div className="row">
+          <Badge value={t.status} />
+          <Badge value={t.priority} />
+          <Badge tone="info">{t.category}</Badge>
+          <span className="muted small">
+            {fullName(t.student)} · {fmtDateTime(t.createdAt)}
+          </span>
+        </div>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{t.description}</p>
+        {t.attachment && <FileLink file={t.attachment} />}
+        {t.assignedTo && (
+          <p className="small muted">
+            Assigned to <strong>{t.assignedTo.name}</strong>
+          </p>
+        )}
+        <div>
+          <h3 style={{ marginBottom: 6 }}>Conversation</h3>
+          {!t.responses.length ? (
+            <p className="muted small">No replies yet.</p>
+          ) : (
+            t.responses.map((r, i) => (
+              <div key={i} className="card" style={{ padding: 10, marginBottom: 8 }}>
+                <div className="row-between small">
+                  <strong>{r.byName}</strong>
+                  <span className="faint">{fmtDateTime(r.at)}</span>
+                </div>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{r.message}</p>
+              </div>
+            ))
+          )}
+        </div>
+        {canReply && (
+          <div className="stack">
+            <textarea
+              className="textarea"
+              rows={3}
+              placeholder="Write a reply…"
+              aria-label="Reply"
+              value={reply}
+              maxLength={2000}
+              onChange={(e) => setReply(e.target.value)}
+            />
+            <div className="row">
+              <Button variant="primary" onClick={send} loading={busy} disabled={!reply.trim()}>
+                Send reply
+              </Button>
+              {user.role === 'student' && t.status !== 'closed' && (
+                <Button onClick={() => act(() => api.patch(`/complaints/${id}`, { status: 'closed' }), 'Ticket closed')}>
+                  Close ticket
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+        {canStaff && (
+          <div className="row" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <label className="small strong" htmlFor="tk-status">
+              Status
+            </label>
+            <select
+              id="tk-status"
+              className="select"
+              style={{ width: 'auto' }}
+              value={t.status}
+              onChange={(e) => act(() => api.patch(`/complaints/${id}`, { status: e.target.value }), 'Status updated')}
+            >
+              {STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            {user.role === 'admin' && (
+              <>
+                <label className="small strong" htmlFor="tk-assign">
+                  Assign to
+                </label>
+                <select
+                  id="tk-assign"
+                  className="select"
+                  style={{ width: 'auto' }}
+                  value={t.assignedTo?._id || ''}
+                  onChange={(e) =>
+                    e.target.value && act(() => api.patch(`/complaints/${id}`, { assignedTo: e.target.value }), 'Ticket assigned')
+                  }
+                >
+                  <option value="">Unassigned</option>
+                  {assignees.data
+                    ?.filter((u) => ['admin', 'faculty'].includes(u.role))
+                    .map((u) => (
+                      <option key={u._id} value={u._id}>
+                        {u.name} ({u.role})
+                      </option>
+                    ))}
+                </select>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Modal title={t ? t.subject : 'Ticket'} onClose={onClose} size="lg">
-      {loading ? (
-        <PageLoader />
-      ) : error ? (
-        <ErrorState message={error} onRetry={reload} />
-      ) : (
-        <div className="stack">
-          <div className="row">
-            <Badge value={t.status} />
-            <Badge value={t.priority} />
-            <Badge tone="info">{t.category}</Badge>
-            <span className="muted small">
-              {fullName(t.student)} · {fmtDateTime(t.createdAt)}
-            </span>
-          </div>
-          <p style={{ whiteSpace: 'pre-wrap' }}>{t.description}</p>
-          {t.attachment && <FileLink file={t.attachment} />}
-          {t.assignedTo && (
-            <p className="small muted">
-              Assigned to <strong>{t.assignedTo.name}</strong>
-            </p>
-          )}
-          <div>
-            <h3 style={{ marginBottom: 6 }}>Conversation</h3>
-            {!t.responses.length ? (
-              <p className="muted small">No replies yet.</p>
-            ) : (
-              t.responses.map((r, i) => (
-                <div key={i} className="card" style={{ padding: 10, marginBottom: 8 }}>
-                  <div className="row-between small">
-                    <strong>{r.byName}</strong>
-                    <span className="faint">{fmtDateTime(r.at)}</span>
-                  </div>
-                  <p style={{ whiteSpace: 'pre-wrap' }}>{r.message}</p>
-                </div>
-              ))
-            )}
-          </div>
-          {!(closed && user.role === 'student') && user.role !== 'parent' && (
-            <div className="stack">
-              <textarea
-                className="textarea"
-                rows={3}
-                placeholder="Write a reply…"
-                aria-label="Reply"
-                value={reply}
-                maxLength={2000}
-                onChange={(e) => setReply(e.target.value)}
-              />
-              <div className="row">
-                <Button variant="primary" onClick={send} loading={busy} disabled={!reply.trim()}>
-                  Send reply
-                </Button>
-                {user.role === 'student' && t.status !== 'closed' && (
-                  <Button onClick={() => act(() => api.patch(`/complaints/${id}`, { status: 'closed' }), 'Ticket closed')}>
-                    Close ticket
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-          {canStaff && (
-            <div className="row" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-              <label className="small strong" htmlFor="tk-status">
-                Status
-              </label>
-              <select
-                id="tk-status"
-                className="select"
-                style={{ width: 'auto' }}
-                value={t.status}
-                onChange={(e) => act(() => api.patch(`/complaints/${id}`, { status: e.target.value }), 'Status updated')}
-              >
-                {STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-              {user.role === 'admin' && (
-                <>
-                  <label className="small strong" htmlFor="tk-assign">
-                    Assign to
-                  </label>
-                  <select
-                    id="tk-assign"
-                    className="select"
-                    style={{ width: 'auto' }}
-                    value={t.assignedTo?._id || ''}
-                    onChange={(e) =>
-                      e.target.value && act(() => api.patch(`/complaints/${id}`, { assignedTo: e.target.value }), 'Ticket assigned')
-                    }
-                  >
-                    <option value="">Unassigned</option>
-                    {assignees.data
-                      ?.filter((u) => ['admin', 'faculty'].includes(u.role))
-                      .map((u) => (
-                        <option key={u._id} value={u._id}>
-                          {u.name} ({u.role})
-                        </option>
-                      ))}
-                  </select>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {content}
     </Modal>
   );
+}
+
+function pageSubtitle(role: string) {
+  if (role === 'student') return 'Raise an issue and track its progress';
+  if (role === 'admin') return 'Review, assign and resolve student tickets';
+  return 'Tickets assigned to you';
 }
 
 export default function Complaints() {
@@ -170,7 +190,9 @@ export default function Complaints() {
 
   const create = async (v) => {
     const fd = new FormData();
-    ['category', 'subject', 'description', 'priority'].forEach((k) => v[k] && fd.append(k, v[k]));
+    for (const key of ['category', 'subject', 'description', 'priority']) {
+      if (v[key]) fd.append(key, v[key]);
+    }
     if (v.attachment) fd.append('attachment', v.attachment);
     await api.post('/complaints', fd);
     toast.success('Ticket submitted');
@@ -182,13 +204,7 @@ export default function Complaints() {
     <div className="page">
       <PageHeader
         title="Support tickets"
-        subtitle={
-          isStudent
-            ? 'Raise an issue and track its progress'
-            : user.role === 'admin'
-              ? 'Review, assign and resolve student tickets'
-              : 'Tickets assigned to you'
-        }
+        subtitle={pageSubtitle(user.role)}
         actions={
           isStudent && (
             <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>

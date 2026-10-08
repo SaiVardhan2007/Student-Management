@@ -1,3 +1,4 @@
+// All environment variables read in one place, with defaults.
 import path from 'path';
 
 /**
@@ -49,6 +50,10 @@ export const env = {
     const dir = process.env.UPLOAD_DIR || 'uploads';
     return path.isAbsolute(dir) ? dir : path.join(process.cwd(), dir);
   },
+  // 'disk' (default) or 'gridfs' (store uploads in MongoDB — for hosts without a persistent disk)
+  get storage() {
+    return process.env.STORAGE === 'gridfs' ? 'gridfs' : 'disk';
+  },
   get maxFileSizeMb() {
     return num(process.env.MAX_FILE_SIZE_MB, 10);
   },
@@ -70,6 +75,29 @@ export const env = {
   },
   get lockoutMinutes() {
     return num(process.env.LOCKOUT_MINUTES, 15);
+  },
+  // SMTP for outgoing mail (password reset, faculty approval). Without SMTP_HOST, mails are only written to the log.
+  get smtp() {
+    const host = process.env.SMTP_HOST;
+    if (!host) return null;
+    const port = num(process.env.SMTP_PORT, 587);
+    return {
+      host,
+      port,
+      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    };
+  },
+  get mailFrom() {
+    return process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@localhost';
+  },
+  // Razorpay payment gateway. Fee payments through the gateway are disabled until both keys are set.
+  get razorpay() {
+    const keyId = process.env.RAZORPAY_KEY_ID || '';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    if (!keyId || !keySecret) return null;
+    return { keyId, keySecret, webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '' };
   },
   get allowDemoSeed() {
     return process.env.ALLOW_DEMO_SEED === 'true';

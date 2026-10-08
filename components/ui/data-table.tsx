@@ -1,11 +1,15 @@
 'use client';
 
+// Reusable table with sorting, pagination and mobile layout. Used by ResourcePage and several dashboard pages.
+
 import Icon from '@/components/ui/icon';
 import { Button, EmptyState, ErrorState, TableSkeleton } from '@/components/ui';
 
+/** "Showing 1-15 of 40" text plus previous/next buttons. meta comes from the API list response. */
 export function Pagination({ meta, page, onPage }: any) {
-  if (!meta || meta.total === 0) return null;
-  const from = (meta.page - 1) * meta.limit + 1;
+  // keep the pager when we are past the last page (for example after deleting its only row)
+  if (!meta || (meta.total === 0 && page <= 1)) return null;
+  const from = meta.total ? (meta.page - 1) * meta.limit + 1 : 0;
   const to = Math.min(meta.page * meta.limit, meta.total);
   return (
     <nav className="pagination" aria-label="Pagination">
@@ -25,7 +29,10 @@ export function Pagination({ meta, page, onPage }: any) {
 
 /**
  * columns: [{ key, label, render?(row), sortKey?, className? }]
- * Stacks into label/value cards on small screens.
+ *   render  custom cell content (default: row[key], or a dash when empty)
+ *   sortKey makes the header clickable; sort is '-field' when descending
+ * actions(row) returns the buttons for the last column.
+ * On small screens the rows stack into label/value cards (CSS uses data-label).
  */
 export default function DataTable({
   columns,
@@ -44,10 +51,31 @@ export default function DataTable({
 }: any) {
   if (error && !rows?.length) return <ErrorState message={error} onRetry={onRetry} />;
   if (loading && !rows?.length) return <TableSkeleton cols={Math.min(columns.length, 6)} />;
-  if (!loading && !rows?.length) return empty || <EmptyState title="No records found" message="Try adjusting your search or filters." />;
+  if (!loading && !rows?.length) {
+    return page > 1 ? (
+      <>
+        {empty}
+        <Pagination meta={meta} page={page} onPage={onPage} />
+      </>
+    ) : (
+      empty || <EmptyState title="No records found" message="Try adjusting your search or filters." />
+    );
+  }
 
-  const toggleSort = (k) => onSort?.(sort === k ? `-${k}` : k);
-  const arrow = (k) => (sort === k ? ' ▲' : sort === `-${k}` ? ' ▼' : '');
+  // Clicking the same column again flips between ascending and descending
+  const toggleSort = (key) => onSort?.(sort === key ? `-${key}` : key);
+
+  const sortArrow = (key) => {
+    if (sort === key) return ' ▲';
+    if (sort === `-${key}`) return ' ▼';
+    return '';
+  };
+
+  const ariaSort = (key) => {
+    if (sort === key) return 'ascending';
+    if (sort === `-${key}`) return 'descending';
+    return 'none';
+  };
 
   return (
     <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity .15s' }}>
@@ -59,12 +87,12 @@ export default function DataTable({
                 <th
                   key={c.key}
                   className={c.sortKey ? 'sortable' : ''}
-                  aria-sort={c.sortKey ? (sort === c.sortKey ? 'ascending' : sort === `-${c.sortKey}` ? 'descending' : 'none') : undefined}
+                  aria-sort={c.sortKey ? ariaSort(c.sortKey) : undefined}
                 >
                   {c.sortKey ? (
                     <button onClick={() => toggleSort(c.sortKey)}>
                       {c.label}
-                      {arrow(c.sortKey)}
+                      {sortArrow(c.sortKey)}
                     </button>
                   ) : (
                     c.label
@@ -97,6 +125,7 @@ export default function DataTable({
   );
 }
 
+/** Small icon button used in the actions column (edit, delete, ...). */
 export function RowAction({ icon, label, onClick, danger }: any) {
   return (
     <button

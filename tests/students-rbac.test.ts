@@ -1,5 +1,5 @@
 import request from './support/request';
-import { setupDb, teardownDb, makeFixtures, login, auth, PASSWORD } from './helpers';
+import { setupDb, teardownDb, makeFixtures, auth, PASSWORD } from './helpers';
 import { User, Student, AuditLog } from '@/models';
 
 let app: any;
@@ -74,20 +74,66 @@ describe('role-based access control', () => {
 });
 
 describe('student management', () => {
-  test('admin creates a student with a login account and temporary password', async () => {
+  test('admin creates a student record; the student then signs up with email + admission number', async () => {
     const res = await request(app).post('/api/students').set(auth(fx.tokens.admin)).send(payload());
     expect(res.status).toBe(201);
     expect(res.body.data.student.studentId).toBe('S900');
-    const temp = res.body.data.temporaryPassword;
-    expect(temp).toBeTruthy();
-    const user = await User.findOne({ email: 'new.student@t.local' }).select('+password');
+    expect(res.body.data.temporaryPassword).toBeUndefined();
+    expect(await User.exists({ email: 'new.student@t.local' })).toBeNull();
+
+    const reg = (over = {}) =>
+      request(app)
+        .post('/api/auth/register')
+        .send({ accountType: 'student', admissionNumber: 's900', email: 'new.student@t.local', password: PASSWORD, ...over });
+    // unknown admission number / email that is not the one on record
+    expect((await reg({ admissionNumber: 'NOPE1' })).status).toBe(400);
+    expect((await reg({ email: 'someone.else@t.local' })).status).toBe(400);
+    const ok = await reg();
+    expect(ok.status).toBe(201);
+    const user = await User.findOne({ email: 'new.student@t.local' });
     expect(user.role).toBe('student');
-    expect(user.mustChangePassword).toBe(true);
-    expect(user.password).not.toBe(temp);
-    expect((await login(app, 'new.student@t.local', temp)).user.email).toBe('new.student@t.local');
+    expect(String((await Student.findOne({ studentId: 'S900' })).user)).toBe(String(user._id));
+    // one account per admission number and per email
+    expect((await reg()).status).toBe(409);
+    expect((await reg({ email: 'stu1@t.local' })).status).toBe(409);
     // enrolled in the semester's subjects automatically
     const en = await request(app).get(`/api/students/${res.body.data.student._id}/enrollments`).set(auth(fx.tokens.admin));
     expect(en.body.data).toHaveLength(2);
+  });
+
+  test('student forgot-password needs the matching admission number; admin can fix the email', async () => {
+    const forgot = (body) => request(app).post('/api/auth/forgot-password').send(body);
+    const generic = (await forgot({ email: 'ghost@t.local' })).body.message;
+    // wrong / missing admission number: same generic answer and no token is stored
+    expect((await forgot({ email: 'new.student@t.local', admissionNumber: 'S111' })).body.message).toBe(generic);
+    expect((await forgot({ email: 'new.student@t.local' })).body.message).toBe(generic);
+    expect((await User.findOne({ email: 'new.student@t.local' }).select('+resetTokenHash')).resetTokenHash).toBeUndefined();
+    expect((await forgot({ email: 'new.student@t.local', admissionNumber: 's900' })).status).toBe(200);
+    expect((await User.findOne({ email: 'new.student@t.local' }).select('+resetTokenHash')).resetTokenHash).toBeTruthy();
+
+    // admin changes the email on the student record; the login email follows
+    const s = await Student.findOne({ studentId: 'S900' });
+    const upd = await request(app).patch(`/api/students/${s._id}`).set(auth(fx.tokens.admin)).send({ email: 'fixed.student@t.local' });
+    expect(upd.status).toBe(200);
+    expect(await User.exists({ email: 'fixed.student@t.local' })).toBeTruthy();
+    await request(app).patch(`/api/students/${s._id}`).set(auth(fx.tokens.admin)).send({ email: 'new.student@t.local' });
+  });
+
+  test('faculty sign-up waits for admin approval', async () => {
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ accountType: 'faculty', name: 'Prof New', email: 'prof.new@t.local', password: PASSWORD });
+    expect(reg.status).toBe(202);
+    expect(reg.body.data.accessToken).toBeUndefined();
+    const login1 = await request(app).post('/api/auth/login').send({ email: 'prof.new@t.local', password: PASSWORD });
+    expect(login1.status).toBe(403);
+    const u = await User.findOne({ email: 'prof.new@t.local' });
+    expect(u.approvalStatus).toBe('pending');
+    // only admins can approve
+    const body = { employeeId: 'E900', department: String(fx.dept._id) };
+    expect((await request(app).post(`/api/users/${u._id}/approve`).set(auth(fx.tokens.stu1)).send(body)).status).toBe(403);
+    expect((await request(app).post(`/api/users/${u._id}/approve`).set(auth(fx.tokens.admin)).send(body)).status).toBe(200);
+    expect((await request(app).post('/api/auth/login').send({ email: 'prof.new@t.local', password: PASSWORD })).status).toBe(200);
   });
 
   test('rejects duplicates (studentId case-insensitive and email)', async () => {
@@ -168,7 +214,7 @@ describe('student management', () => {
     const res = await request(app).delete(`/api/students/${s._id}`).set(auth(fx.tokens.admin));
     expect(res.status).toBe(200);
     expect((await Student.findById(s._id)).status).toBe('inactive');
-    expect((await request(app).post('/api/auth/login').send({ email: 'new.student@t.local', password: PASSWORD })).status).toBe(401);
+    expect((await request(app).post('/api/auth/login').send({ email: 'new.student@t.local', password: PASSWORD })).status).toBe(403);
     expect(await AuditLog.countDocuments({ action: 'STUDENT_DEACTIVATED', entityId: String(s._id) })).toBe(1);
     // reactivate
     expect((await request(app).post(`/api/students/${s._id}/activate`).set(auth(fx.tokens.admin))).status).toBe(200);

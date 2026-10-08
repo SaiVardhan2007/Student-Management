@@ -1,5 +1,8 @@
 'use client';
 
+// Assignments list. Faculty/admin create and edit assignments; students only view them and see
+// their own submission status. Each row links to the detail page. API: /assignments
+
 import Link from 'next/link';
 import { useAuth } from '@/components/providers/auth-provider';
 import ResourcePage, { rowToForm } from '@/components/ui/resource-page';
@@ -58,6 +61,7 @@ export default function Assignments() {
       searchPlaceholder="Search title…"
       modalSize="lg"
       fields={isStudent ? [] : assignmentFields}
+      // When editing, convert the deadline to the format a datetime-local input expects.
       toForm={(row) => ({
         ...rowToForm(
           row,
@@ -65,6 +69,7 @@ export default function Assignments() {
         ),
         deadline: toLocalInput(row.deadline),
       })}
+      // The API wants the deadline as an ISO date string.
       toPayload={(v) => ({ ...v, deadline: new Date(v.deadline).toISOString() })}
       canCreate={!isStudent}
       filters={[

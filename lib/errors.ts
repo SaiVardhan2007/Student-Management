@@ -1,3 +1,4 @@
+// AppError: the error class services throw on purpose; lib/api.ts turns it into a JSON response with the right status code.
 export type FieldError = { field: string; message: string };
 
 export class AppError extends Error {

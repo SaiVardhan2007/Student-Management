@@ -1,3 +1,4 @@
+// Creates login accounts (User documents) for students and faculty.
 import crypto from 'crypto';
 import { User } from '@/models';
 import { AppError } from '@/lib/errors';
@@ -11,7 +12,7 @@ export function generatePassword() {
   return `${core}Aa1`;
 }
 
-/** Create a login account. Returns { user, temporaryPassword? }. */
+/** Create a login account. If no password is given, a temporary one is generated and the user must change it at first login. Returns { user, temporaryPassword? }. */
 export async function createAccount({ name, email, role, password }: { name: string; email: string; role: string; password?: string }) {
   if (await User.exists({ email }))
     throw AppError.conflict('An account with this email already exists', [{ field: 'email', message: 'Already exists' }]);

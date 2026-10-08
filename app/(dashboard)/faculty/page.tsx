@@ -1,5 +1,8 @@
 'use client';
 
+// Faculty management (admin only): list, add, edit, deactivate/activate faculty, export CSV and
+// assign subjects. APIs: /faculty, /faculty/:id/subjects, /faculty/:id/activate, /faculty/export
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import ResourcePage from '@/components/ui/resource-page';
@@ -33,6 +36,7 @@ const FIELDS = [
   { name: 'joiningDate', label: 'Joining date', type: 'date' },
 ];
 
+/** Modal to choose which subjects a faculty member teaches. */
 function AssignSubjects({ faculty, onClose, onDone }: any) {
   const current = useFetch(`/faculty/${faculty._id}`);
   const fields = [
@@ -76,14 +80,12 @@ export default function Faculty() {
   const confirm = useConfirm();
 
   const activate = async (row, reload) => {
-    if (
-      !(await confirm({
-        title: 'Activate faculty member?',
-        message: `${row.firstName} ${row.lastName} will be able to log in again.`,
-        confirmLabel: 'Activate',
-      }))
-    )
-      return;
+    const ok = await confirm({
+      title: 'Activate faculty member?',
+      message: `${row.firstName} ${row.lastName} will be able to log in again.`,
+      confirmLabel: 'Activate',
+    });
+    if (!ok) return;
     try {
       await api.post(`/faculty/${row._id}/activate`);
       toast.success('Faculty activated');
@@ -106,16 +108,17 @@ export default function Faculty() {
         defaultSort="employeeId"
         deleteMessage={(r) => `Deactivate ${r.firstName} ${r.lastName}? Their login will be disabled. Existing records are kept.`}
         canDelete={(r) => r.status !== 'inactive'}
+        // A new faculty account comes with a temporary password; show it once.
         onSaved={(d) => d?.temporaryPassword && setCreds({ email: d.faculty.email, password: d.temporaryPassword })}
         searchPlaceholder="Search name, ID, email…"
-        headerActions={
+        headerActions={(list) => (
           <Button
             icon="download"
-            onClick={() => downloadFrom('/faculty/export', {}, 'faculty.csv').catch((e) => toast.error(errorMessage(e)))}
+            onClick={() => downloadFrom('/faculty/export', list.queryParams, 'faculty.csv').catch((e) => toast.error(errorMessage(e)))}
           >
             Export CSV
           </Button>
-        }
+        )}
         filters={[
           { name: 'department', label: 'Department', optionsUrl: '/departments' },
           {

@@ -1,5 +1,8 @@
 'use client';
 
+// Academic calendar. Admin manages events (add/edit/delete) through ResourcePage. Everyone else
+// gets a read-only month-by-month agenda. API: /calendar
+
 import { useState } from 'react';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useFetch } from '@/hooks';
@@ -18,70 +21,81 @@ const AUDIENCE = [
 ];
 const TONE = { exam: 'danger', holiday: 'success', assignment: 'warning', seminar: 'info', event: 'primary', deadline: 'warning' };
 
+function firstOfThisMonth() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+// Formats a date as YYYY-MM-DD in local time (what the API expects for from/to).
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+/** Read-only list of events for one month, with previous/next/today buttons. */
 function Agenda() {
-  const [month, setMonth] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
+  // `month` is always the first day of the month being shown.
+  const [month, setMonth] = useState(firstOfThisMonth);
   const from = ymd(month);
   const to = ymd(new Date(month.getFullYear(), month.getMonth() + 1, 0));
   const { data, loading, error, reload } = useFetch('/calendar', { from, to, limit: 100, sort: 'startDate' });
+  // Move forward (+1) or back (-1) by n months.
   const shift = (n) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+  let body;
+  if (loading) {
+    body = <PageLoader />;
+  } else if (error) {
+    body = <ErrorState message={error} onRetry={reload} />;
+  } else if (!data.length) {
+    body = <EmptyState icon="calendar" title="No events this month" />;
+  } else {
+    body = data.map((e) => {
+      // Dates are stored as UTC midnight, so read them in UTC to avoid showing the wrong day.
+      const d = new Date(e.startDate);
+      return (
+        <div key={e._id} className="calendar-day">
+          <div className="calendar-date">
+            <div className="d">{d.getUTCDate()}</div>
+            <div className="m">{d.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' })}</div>
+          </div>
+          <div className="grow">
+            <div className="strong">{e.title}</div>
+            {e.description && <div className="muted small">{e.description}</div>}
+            {e.endDate && (
+              <div className="faint small">Until {new Date(e.endDate).toLocaleDateString(undefined, { timeZone: 'UTC' })}</div>
+            )}
+          </div>
+          <Badge tone={TONE[e.type]}>{e.type}</Badge>
+        </div>
+      );
+    });
+  }
+
   return (
     <Card
       title={month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
       actions={
         <>
           <Button size="sm" icon="chevronLeft" aria-label="Previous month" onClick={() => shift(-1)} />
-          <Button size="sm" onClick={() => setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>
+          <Button size="sm" onClick={() => setMonth(firstOfThisMonth())}>
             Today
           </Button>
           <Button size="sm" icon="chevronRight" aria-label="Next month" onClick={() => shift(1)} />
         </>
       }
     >
-      {loading ? (
-        <PageLoader />
-      ) : error ? (
-        <ErrorState message={error} onRetry={reload} />
-      ) : !data.length ? (
-        <EmptyState icon="calendar" title="No events this month" />
-      ) : (
-        data.map((e) => {
-          const d = new Date(e.startDate);
-          return (
-            <div key={e._id} className="calendar-day">
-              <div className="calendar-date">
-                <div className="d">{d.getUTCDate()}</div>
-                <div className="m">{d.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' })}</div>
-              </div>
-              <div className="grow">
-                <div className="strong">{e.title}</div>
-                {e.description && <div className="muted small">{e.description}</div>}
-                {e.endDate && (
-                  <div className="faint small">Until {new Date(e.endDate).toLocaleDateString(undefined, { timeZone: 'UTC' })}</div>
-                )}
-              </div>
-              <Badge tone={TONE[e.type]}>{e.type}</Badge>
-            </div>
-          );
-        })
-      )}
+      {body}
     </Card>
   );
 }
 
 export default function Calendar() {
   const { user } = useAuth();
-  if (user.role !== 'admin')
+  if (user.role !== 'admin') {
     return (
       <div className="page">
         <PageHeader title="Academic calendar" subtitle="Exams, holidays, deadlines and events" />
         <Agenda />
       </div>
     );
+  }
   return (
     <ResourcePage
       title="Academic calendar"

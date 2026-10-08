@@ -1,5 +1,9 @@
 'use client';
 
+// Notice board. Everyone can read notices meant for them. Admin can post to any audience;
+// faculty can only post to a class section they teach, and can edit or delete only their own notices.
+// Uses the /notices API through ResourcePage.
+
 import { useAuth } from '@/components/providers/auth-provider';
 import ResourcePage from '@/components/ui/resource-page';
 import { Badge } from '@/components/ui';
@@ -21,6 +25,7 @@ export default function Notices() {
   const isFaculty = user.role === 'faculty';
   const canPost = isAdmin || isFaculty;
 
+  // Form fields differ by role: only admin can choose the audience, department, program and year.
   const fields = canPost
     ? [
         { name: 'title', label: 'Title', required: true, maxLength: 200, span2: true },

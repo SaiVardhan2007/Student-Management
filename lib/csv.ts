@@ -1,8 +1,13 @@
+// Builds CSV text and CSV download responses for the report/export routes.
 /** CSV helpers with spreadsheet-formula-injection protection. */
-function cell(v: unknown): string {
+// Values that start with a formula character but are harmless: phone numbers (+91 98765-43210) and plain negative numbers (-12.5).
+const SAFE_LEADING = /^(\+[0-9][0-9 -]*|-[0-9]+(\.[0-9]+)?)$/;
+
+/** One CSV cell: quoted when needed, and spreadsheet formulas are neutralised with a leading apostrophe. */
+export function cell(v: unknown): string {
   if (v === null || v === undefined) return '';
   let s = v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (/^[=+\-@\t\r]/.test(s) && !SAFE_LEADING.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

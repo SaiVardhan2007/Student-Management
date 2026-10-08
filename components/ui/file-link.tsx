@@ -10,8 +10,10 @@ export default function FileLink({ file, label }: any) {
   if (!file?.path) return <span className="faint">—</span>;
   const open = async (e) => {
     e.preventDefault();
+    // PDFs and images open in a new tab; every other file type is downloaded
+    const canShowInBrowser = /\.(pdf|png|jpe?g)$/i.test(file.path);
     try {
-      await openFile(file.path, { download: !/\.(pdf|png|jpe?g)$/i.test(file.path), name: file.originalName });
+      await openFile(file.path, { download: !canShowInBrowser, name: file.originalName });
     } catch (err) {
       toast.error(errorMessage(err, 'Unable to open the file.'));
     }

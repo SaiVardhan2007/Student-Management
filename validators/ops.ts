@@ -1,8 +1,10 @@
+// Zod schemas that check request data for exams, timetable, assignments, notices, materials and the calendar
+// before the services run.
 import { z, objectId, optionalId, dateField, optionalDate, time, reqStr, str, bool } from '@/validators/common';
 import { DAYS } from '@/models/academics-ops';
 import { MATERIAL_TYPES, NOTICE_AUDIENCES } from '@/models/campus';
 
-
+// Adds a rule that endTime must be later than startTime. Times are 'HH:mm', so comparing as text works.
 const timeOrder = (s) => s.refine((d) => d.endTime > d.startTime, { message: 'End time must be after start time', path: ['endTime'] });
 
 export const examSchema = timeOrder(
@@ -30,6 +32,7 @@ export const assignmentSchema = z.object({
   title: reqStr(200),
   description: str(5000).optional(),
   subject: objectId,
+  // A single id is accepted too and turned into a list.
   sections: z.union([z.array(objectId), objectId.transform((v) => [v])]).optional(),
   deadline: dateField,
   maxMarks: z.coerce.number().positive().max(1000),

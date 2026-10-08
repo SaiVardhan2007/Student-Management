@@ -1,3 +1,4 @@
+// Builds the standard list/create/get/update/delete route handlers for a resource from its CRUD service.
 import type { ZodTypeAny } from 'zod';
 import { route, type Role } from '@/lib/api';
 import type { CrudService } from '@/services/crud';

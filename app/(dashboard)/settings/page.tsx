@@ -1,5 +1,8 @@
 'use client';
 
+// Admin settings: college details, attendance and pass rules, library rules, logo and grading scale.
+// Uses /settings and /settings/logo.
+
 import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api, errorMessage } from '@/lib/api-client';
@@ -9,10 +12,12 @@ import DynamicForm from '@/components/ui/dynamic-form';
 import { Alert, Button, Card, ErrorState, Field, PageHeader, PageLoader, Tabs } from '@/components/ui';
 import { fileProblem } from '@/lib/validation';
 
+// Editable table of grades (grade, minimum percent, grade points).
 function GradeScale({ initial, onSaved }: any) {
   const [rows, setRows] = useState(initial.map((g) => ({ ...g })));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Change one field of row number i
   const set = (i, k, v) => setRows((r) => r.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
 
   const save = async () => {
@@ -114,6 +119,7 @@ function GradeScale({ initial, onSaved }: any) {
   );
 }
 
+// Logo upload button (PNG or JPG, max 2 MB).
 function Logo({ current, onSaved }: any) {
   const ref = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -150,11 +156,13 @@ export default function Settings() {
   const [tab, setTab] = useState('general');
   if (loading && !data) return <PageLoader />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
+  // Reload the settings here and the branding (name/logo) shown in the sidebar
   const refresh = () => {
     reload();
     reloadBranding();
   };
 
+  // Form values are text, so numbers are converted before sending
   const save = async (v) => {
     await api.put('/settings', {
       collegeName: v.collegeName,

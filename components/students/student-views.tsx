@@ -1,9 +1,12 @@
 'use client';
 
+// Read-only attendance and results sections shown on a student's page.
+
 import { useFetch } from '@/hooks';
 import { Alert, Badge, Card, ErrorState, PageLoader, ProgressBar } from '@/components/ui';
 import { titleCase } from '@/lib/format';
 
+/** Overall, subject-wise and monthly attendance of one student. */
 export function AttendanceSummaryView({ studentId }: any) {
   const { data, loading, error, reload } = useFetch(`/attendance/student/${studentId}/summary`);
   if (loading) return <PageLoader />;
@@ -101,6 +104,7 @@ export function AttendanceSummaryView({ studentId }: any) {
   );
 }
 
+/** CGPA, semester SGPA and per-subject results of one student. */
 export function ResultsView({ studentId }: any) {
   const { data, loading, error, reload } = useFetch(`/marks/student/${studentId}/results`);
   if (loading) return <PageLoader />;

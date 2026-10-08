@@ -1,3 +1,4 @@
+// Assignment service: faculty create/edit assignments and grade submissions; students view and submit.
 import type { Ctx } from '@/lib/context';
 import { Assignment, Submission, Student, Enrollment } from '@/models';
 import { AppError } from '@/lib/errors';
@@ -15,19 +16,32 @@ const POPULATE = [
   { path: 'sections', select: 'name' },
 ];
 
+/** List assignments the user may see. Students also get their own submission status on each one. */
 export async function list(ctx: Ctx) {
   const filter = filtersFromQuery(ctx.query, { subject: 'id' });
+  // visibleSubjectIds returns nothing (falsy) for admin, who can see every subject
   const subjects = await visibleSubjectIds(ctx);
-  if (subjects)
-    filter.subject = filter.subject
-      ? subjects.some((s) => String(s) === String(filter.subject))
-        ? filter.subject
-        : null
-      : { $in: subjects };
+  if (subjects) {
+    if (!filter.subject) {
+      filter.subject = { $in: subjects };
+    } else if (!subjects.some((s) => String(s) === String(filter.subject))) {
+      filter.subject = null; // asked for a subject the user cannot see, so match nothing
+    }
+  }
   let student;
   if (ctx.user.role === 'student') {
     student = await studentProfile(ctx);
+    // empty sections list means the assignment is for everyone
     filter.$and = [{ $or: [{ sections: { $size: 0 } }, { sections: student.section }] }];
+    // status filter goes into the query (not applied after paging) so pagination and meta.total stay correct
+    const wanted = ctx.query.status;
+    if (wanted) {
+      const own = await Submission.find({ student: student._id }).select('assignment status').lean();
+      const submittedIds = own.map((x: any) => x.assignment);
+      if (wanted === 'pending') filter.$and.push({ _id: { $nin: submittedIds }, deadline: { $gte: new Date() } });
+      else if (wanted === 'overdue') filter.$and.push({ _id: { $nin: submittedIds }, deadline: { $lt: new Date() } });
+      else filter.$and.push({ _id: { $in: own.filter((x: any) => x.status === wanted).map((x: any) => x.assignment) } });
+    }
   }
   const { items, meta } = await paginate(Assignment, ctx, {
     filter,
@@ -37,20 +51,21 @@ export async function list(ctx: Ctx) {
     populate: POPULATE,
   });
 
-  let out = items;
+  let result = items;
   if (student) {
-    const subs = await Submission.find({ student: student._id, assignment: { $in: items.map((a) => a._id) } })
+    const submissions = await Submission.find({ student: student._id, assignment: { $in: items.map((a) => a._id) } })
       .select('assignment status marks feedback submittedAt')
       .lean();
-    const map = new Map(subs.map((s) => [String(s.assignment), s]));
-    out = items.map((a) => {
-      const s = map.get(String(a._id));
-      return { ...a, submission: s || null, submissionStatus: s ? s.status : new Date(a.deadline) < new Date() ? 'overdue' : 'pending' };
+    const submissionByAssignment = new Map(submissions.map((s) => [String(s.assignment), s]));
+    result = items.map((assignment) => {
+      const submission = submissionByAssignment.get(String(assignment._id));
+      let submissionStatus = 'pending';
+      if (submission) submissionStatus = submission.status;
+      else if (new Date(assignment.deadline) < new Date()) submissionStatus = 'overdue';
+      return { ...assignment, submission: submission || null, submissionStatus };
     });
-    const st = ctx.query.status;
-    if (st) out = out.filter((a) => a.submissionStatus === st);
   }
-  return ok(out, 'OK', 200, meta);
+  return ok(result, 'OK', 200, meta);
 }
 
 export async function get(ctx: Ctx) {
@@ -61,6 +76,8 @@ export async function get(ctx: Ctx) {
   if (subjects && !subjects.some((s) => String(s) === String(a.subject._id))) throw AppError.forbidden();
   if (ctx.user.role === 'student') {
     const student = await studentProfile(ctx);
+    // same section restriction as list: empty sections means everyone
+    if (a.sections?.length && !a.sections.some((x: any) => String(x._id || x) === String(student.section))) throw AppError.forbidden();
     a.submission = await Submission.findOne({ assignment: a._id, student: student._id }).lean();
   }
   return ok(a);
@@ -86,6 +103,7 @@ export async function create(ctx: Ctx) {
   return created(a, 'Assignment created');
 }
 
+// Load the assignment from the URL id and make sure the user may manage its subject.
 async function loadOwned(ctx) {
   requireValidId(ctx.params.id);
   const a = await Assignment.findById(ctx.params.id);
@@ -111,7 +129,7 @@ export async function update(ctx: Ctx) {
 export async function remove(ctx: Ctx) {
   const a = await loadOwned(ctx);
   const subs = await Submission.find({ assignment: a._id });
-  subs.forEach((s) => s.files.forEach(removeFile));
+  for (const sub of subs) sub.files.forEach(removeFile);
   await Submission.deleteMany({ assignment: a._id });
   removeFile(a.attachment);
   await a.deleteOne();
@@ -119,13 +137,15 @@ export async function remove(ctx: Ctx) {
   return ok(null, 'Assignment deleted');
 }
 
+/** A student submits (or re-submits) an assignment. Late submissions are accepted but marked 'late'. */
 export async function submit(ctx: Ctx) {
   const student = await studentProfile(ctx);
   requireValidId(ctx.params.id);
   const a = await Assignment.findById(ctx.params.id);
   if (!a) throw AppError.notFound('Assignment not found');
   const enrolled = await Enrollment.exists({ student: student._id, subject: a.subject, status: 'enrolled' });
-  if (!enrolled || (a.sections?.length && !a.sections.some((s) => String(s) === String(student.section))))
+  const restrictedToOtherSections = a.sections?.length && !a.sections.some((s) => String(s) === String(student.section));
+  if (!enrolled || restrictedToOtherSections)
     throw AppError.forbidden('This assignment is not assigned to you');
   const files = (ctx.files || []).map((f) => toFileMeta(f, 'submissions'));
   if (!files.length && !ctx.body.text) throw AppError.badRequest('Attach at least one file or write an answer');
@@ -157,6 +177,7 @@ export async function submit(ctx: Ctx) {
   return created(sub, isLate ? 'Submitted (marked as late)' : 'Assignment submitted');
 }
 
+/** For faculty: every enrolled student with their submission (or 'pending'). */
 export async function submissions(ctx: Ctx) {
   const a = await loadOwned(ctx);
   const enrolled = await Enrollment.find({ subject: a.subject, status: 'enrolled' }).select('student').lean();
@@ -169,17 +190,18 @@ export async function submissions(ctx: Ctx) {
     .sort({ studentId: 1 })
     .lean();
   const subs = await Submission.find({ assignment: a._id }).lean();
-  const map = new Map(subs.map((s) => [String(s.student), s]));
+  const submissionByStudent = new Map(subs.map((s) => [String(s.student), s]));
+  const rows = students.map((student) => {
+    const submission = submissionByStudent.get(String(student._id));
+    return { student, submission: submission || null, status: submission?.status || 'pending' };
+  });
   return ok({
     assignment: { _id: a._id, title: a.title, maxMarks: a.maxMarks, deadline: a.deadline },
-    rows: students.map((s) => ({
-      student: s,
-      submission: map.get(String(s._id)) || null,
-      status: map.get(String(s._id))?.status || 'pending',
-    })),
+    rows,
   });
 }
 
+/** Faculty gives marks and feedback to a submission. */
 export async function evaluate(ctx: Ctx) {
   requireValidId(ctx.params.submissionId, 'submission');
   const sub = await Submission.findById(ctx.params.submissionId);

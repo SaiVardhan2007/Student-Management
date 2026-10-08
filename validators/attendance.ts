@@ -1,8 +1,10 @@
+// Zod schemas that check request data for attendance and marks before the services run.
 import { z, objectId, dateField } from '@/validators/common';
 import { ATTENDANCE_STATUSES, MARK_TYPES } from '@/models/academics-ops';
 
 const statuses = ATTENDANCE_STATUSES as [string, ...string[]];
 
+// Attendance for many students at once, all for one subject, section and date.
 export const markAttendanceSchema = z.object({
   subject: objectId,
   section: objectId,
@@ -12,6 +14,7 @@ export const markAttendanceSchema = z.object({
     .min(1, 'Select at least one student')
     .max(500),
 });
+
 export const correctionRequestSchema = z.object({
   attendance: objectId,
   requestedStatus: z.enum(statuses),
@@ -19,6 +22,7 @@ export const correctionRequestSchema = z.object({
 });
 export const correctionReviewSchema = z.object({ status: z.enum(['approved', 'rejected']), reviewNote: z.string().trim().max(500).optional() });
 
+// Marks for many students at once, all for one subject and exam type.
 export const enterMarksSchema = z.object({
   subject: objectId,
   examType: z.enum(MARK_TYPES as [string, ...string[]]),

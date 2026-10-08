@@ -1,6 +1,5 @@
-/**
- * Student-facing services: documents, support tickets (complaints) and achievements.
- */
+// Student-facing features: documents, support tickets (complaints) and achievements.
+// Routes call these functions; they use the models and notify users when something changes.
 import { StudentDocument, Complaint, Achievement, Student, User } from '@/models';
 import { AppError } from '@/lib/errors';
 import { ok, created } from '@/lib/response';
@@ -12,7 +11,7 @@ import { ownStudentIds, visibleStudentScope } from '@/services/access';
 import { notifyUsers } from '@/services/notify';
 import { audit } from '@/services/audit';
 
-// ====================================================================== documents
+// ---- documents
 const DOC_POPULATE = [
   { path: 'student', select: 'studentId firstName lastName' },
   { path: 'reviewedBy', select: 'name' },
@@ -21,8 +20,10 @@ const DOC_POPULATE = [
 export async function listDocuments(ctx: Ctx) {
   const filter = filtersFromQuery(ctx.query, { status: 'string', type: 'string', student: 'id' });
   if (ctx.user.role !== 'admin') {
+    // non-admins only see their own students' documents
     const ids = await ownStudentIds(ctx);
-    filter.student = filter.student && ids.some((i: any) => String(i) === String(filter.student)) ? filter.student : { $in: ids };
+    const requestedIsOwn = filter.student && ids.some((i: any) => String(i) === String(filter.student));
+    filter.student = requestedIsOwn ? filter.student : { $in: ids };
   }
   const { items, meta } = await paginate(StudentDocument, ctx, {
     filter,
@@ -74,12 +75,13 @@ export async function deleteDocument(ctx: Ctx) {
   return ok(null, 'Document deleted');
 }
 
-// ====================================================================== complaints
+// ---- complaints
 const COMPLAINT_POPULATE = [
   { path: 'student', select: 'studentId firstName lastName' },
   { path: 'assignedTo', select: 'name role' },
 ];
 
+/** Which complaints the user may access: admin all, faculty those assigned to them, others their own students'. */
 async function complaintScope(ctx: Ctx) {
   if (ctx.user.role === 'admin') return {};
   if (ctx.user.role === 'faculty') return { assignedTo: ctx.user._id };
@@ -87,7 +89,8 @@ async function complaintScope(ctx: Ctx) {
 }
 
 export async function listComplaints(ctx: Ctx) {
-  const filter = { ...filtersFromQuery(ctx.query, { status: 'string', category: 'string', priority: 'string' }), ...(await complaintScope(ctx)) };
+  const queryFilter = filtersFromQuery(ctx.query, { status: 'string', category: 'string', priority: 'string' });
+  const filter = { ...queryFilter, ...(await complaintScope(ctx)) };
   const { items, meta } = await paginate(Complaint, ctx, {
     filter,
     searchFields: ['subject', 'description'],
@@ -129,9 +132,20 @@ export async function respondToComplaint(ctx: Ctx) {
   c.responses.push({ by: ctx.user._id, byName: ctx.user.name, message: ctx.body.message });
   if (ctx.user.role !== 'student' && ['open', 'assigned'].includes(c.status)) c.status = 'in_progress';
   await c.save();
-  const target =
-    ctx.user.role === 'student' ? c.assignedTo && [c.assignedTo] : [(await Student.findById(c.student).select('user'))?.user];
-  if (target) await notifyUsers(target, { title: 'New reply on support ticket', message: `${c.subject}`, type: 'complaint', link: '/complaints' });
+  // a student's reply goes to the assignee; a staff reply goes to the student
+  let recipients;
+  if (ctx.user.role === 'student') {
+    if (c.assignedTo) recipients = [c.assignedTo];
+    else {
+      // unassigned ticket: tell the admins so the reply is not lost
+      const admins = await User.find({ role: 'admin', isActive: true }).select('_id').lean();
+      recipients = admins.map((a: any) => a._id);
+    }
+  } else {
+    const student = await Student.findById(c.student).select('user');
+    recipients = [student?.user];
+  }
+  if (recipients) await notifyUsers(recipients, { title: 'New reply on support ticket', message: c.subject, type: 'complaint', link: '/complaints' });
   return ok(c, 'Reply added');
 }
 
@@ -140,9 +154,9 @@ export async function updateComplaint(ctx: Ctx) {
   const c = await Complaint.findOne({ _id: ctx.params.id, ...(await complaintScope(ctx)) });
   if (!c) throw AppError.notFound('Ticket not found');
   const { status, assignedTo } = ctx.body;
-  if (ctx.user.role === 'student') {
-    // students may only close their own ticket
-    if (assignedTo || status !== 'closed') throw AppError.forbidden('Students can only close their own tickets');
+  // students may only close their own ticket
+  if (ctx.user.role === 'student' && (assignedTo || status !== 'closed')) {
+    throw AppError.forbidden('Students can only close their own tickets');
   }
   if (assignedTo) {
     if (ctx.user.role !== 'admin') throw AppError.forbidden('Only admins can assign tickets');
@@ -168,13 +182,14 @@ export async function updateComplaint(ctx: Ctx) {
   return ok(c, 'Ticket updated');
 }
 
-// ====================================================================== achievements
+// ---- achievements
 const ACH_POPULATE = [{ path: 'student', select: 'studentId firstName lastName' }];
 
 export async function listAchievements(ctx: Ctx) {
   const filter = filtersFromQuery(ctx.query, { status: 'string', category: 'string', student: 'id' });
   if (ctx.user.role === 'student' || ctx.user.role === 'parent') filter.student = { $in: await ownStudentIds(ctx) };
   else if (ctx.user.role === 'faculty') {
+    // faculty see achievements of the students they teach
     const scope = await visibleStudentScope(ctx);
     filter.student = { $in: scope.ids };
   }
@@ -219,7 +234,10 @@ export async function deleteAchievement(ctx: Ctx) {
   requireValidId(ctx.params.id);
   const a = await Achievement.findById(ctx.params.id);
   if (!a) throw AppError.notFound('Achievement not found');
-  if (ctx.user.role === 'student' && String(a.student) !== String((await studentProfile(ctx))._id)) throw AppError.forbidden();
+  if (ctx.user.role === 'student') {
+    if (String(a.student) !== String((await studentProfile(ctx))._id)) throw AppError.forbidden();
+    if (a.status === 'verified') throw AppError.conflict('Verified achievements cannot be deleted');
+  }
   removeFile(a.certificate);
   await a.deleteOne();
   return ok(null, 'Achievement deleted');

@@ -1,20 +1,28 @@
+// Grade and GPA calculation. Used by the marks, report and placement services.
 import { Mark, Subject, getSettings } from '@/models';
 
-/** Map a percentage to { grade, points } using the configured grade scale. */
+/**
+ * Map a percentage to { grade, points } using the grade scale from settings.
+ * The scale is checked from the highest minimum percent down; the first match wins.
+ * If nothing matches, the lowest grade is used.
+ */
 export function gradeFor(percentage, scale) {
   const sorted = [...scale].sort((a, b) => b.minPercent - a.minPercent);
-  return sorted.find((g) => percentage >= g.minPercent) || sorted[sorted.length - 1] || { grade: '-', points: 0 };
+  const match = sorted.find((g) => percentage >= g.minPercent);
+  if (match) return match;
+  if (sorted.length > 0) return sorted[sorted.length - 1];
+  return { grade: '-', points: 0 };
 }
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
 /**
- * Compute per-subject results and SGPA/CGPA for a student.
- * Subject total = sum(obtained)/sum(max) across recorded components.
+ * Work out per-subject results, SGPA (per semester) and CGPA (overall) for a student.
+ * A subject's percentage = total marks obtained / total maximum marks over all its exam components.
  */
-export async function computeResults(studentId, { semester }: { semester?: number } = {}) {
+export async function computeResults(studentId, { semester, subjectIds }: { semester?: number; subjectIds?: any[] } = {}) {
   const settings = await getSettings();
-  const marks = await Mark.find({ student: studentId, ...(semester ? { semester } : {}) })
+  const marks = await Mark.find({ student: studentId, ...(semester ? { semester } : {}), ...(subjectIds ? { subject: { $in: subjectIds } } : {}) })
     .populate('subject', 'code name credits type semester')
     .lean();
 
@@ -44,6 +52,7 @@ export async function computeResults(studentId, { semester }: { semester?: numbe
     };
   });
 
+  // SGPA = sum(credits * grade points) / sum(credits), grouped by semester
   const semesters = new Map();
   for (const s of subjects) {
     const sem = s.subject.semester;
@@ -56,15 +65,21 @@ export async function computeResults(studentId, { semester }: { semester?: numbe
     .map((e) => ({ semester: e.semester, credits: e.credits, sgpa: e.credits ? round2(e.weighted / e.credits) : 0 }))
     .sort((a, b) => a.semester - b.semester);
 
-  const totals = semesterResults.reduce((a, s) => ({ c: a.c + s.credits, w: a.w + s.sgpa * s.credits }), { c: 0, w: 0 });
+  // CGPA = credit-weighted average of the semester SGPAs
+  let totalCredits = 0;
+  let totalWeighted = 0;
+  for (const s of semesterResults) {
+    totalCredits += s.credits;
+    totalWeighted += s.sgpa * s.credits;
+  }
   return {
     subjects,
     semesters: semesterResults,
-    cgpa: totals.c ? round2(totals.w / totals.c) : 0,
+    cgpa: totalCredits ? round2(totalWeighted / totalCredits) : 0,
   };
 }
 
-/** Latest CGPA helper for eligibility checks. */
+/** Just the CGPA of a student (used for placement eligibility checks). */
 export async function cgpaOf(studentId) {
   return (await computeResults(studentId)).cgpa;
 }

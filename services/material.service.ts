@@ -1,3 +1,4 @@
+// Study materials (file uploads per subject). Visibility depends on which subjects the user can see.
 import { Material } from '@/models';
 import { AppError } from '@/lib/errors';
 import { ok, created } from '@/lib/response';
@@ -17,8 +18,15 @@ const POPULATE = [
 export async function list(ctx: Ctx) {
   const filter = filtersFromQuery(ctx.query, { subject: 'id', type: 'string' });
   const visible = await visibleSubjectIds(ctx);
-  if (visible)
-    filter.subject = filter.subject ? (visible.some((s: any) => String(s) === String(filter.subject)) ? filter.subject : null) : { $in: visible };
+  // visible === null means the user (admin) can see every subject
+  if (visible) {
+    if (!filter.subject) {
+      filter.subject = { $in: visible };
+    } else {
+      const allowed = visible.some((s: any) => String(s) === String(filter.subject));
+      if (!allowed) filter.subject = null; // matches nothing
+    }
+  }
   const { items, meta } = await paginate(Material, ctx, {
     filter,
     searchFields: ['title', 'description'],

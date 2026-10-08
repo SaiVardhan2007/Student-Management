@@ -1,6 +1,7 @@
+// Zod schemas that check request data for academic structure (departments, programs, years, semesters,
+// sections, subjects, enrollments) before the services run.
 import { z, objectId, optionalId, dateField, reqStr, str, bool } from '@/validators/common';
 import { SUBJECT_TYPES } from '@/models/academic';
-
 
 
 export const departmentSchema = z.object({
@@ -20,6 +21,7 @@ export const programSchema = z.object({
   isActive: bool.optional(),
 });
 
+// Adds a rule that endDate must come after startDate.
 const dateRange = (s) => s.refine((d) => d.endDate > d.startDate, { message: 'End date must be after start date', path: ['endDate'] });
 
 export const academicYearSchema = dateRange(

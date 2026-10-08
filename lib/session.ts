@@ -1,3 +1,4 @@
+// Reads the signed-in user on the server (for Server Components).
 import 'server-only';
 import { cookies } from 'next/headers';
 import { ACCESS_COOKIE, userFromToken, profileOf } from './auth';

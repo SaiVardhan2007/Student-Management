@@ -1,10 +1,20 @@
 'use client';
 
+// Audit logs (admin only): searchable, filterable history of who did what and when.
+// APIs: /audit-logs, /audit-logs/actions (the list of action names for the filter)
+
 import { useState } from 'react';
 import { useFetch, useListQuery } from '@/hooks';
 import DataTable from '@/components/ui/data-table';
 import { Badge, Card, EmptyState, Modal, PageHeader, SearchInput } from '@/components/ui';
 import { fmtDateTime, titleCase } from '@/lib/format';
+
+/** Badge colour for an action name such as 'LOGIN_FAILED' or 'STUDENT_UPDATED'. */
+function actionTone(action: string) {
+  if (/FAILED|DELETED|DEACTIVATED|REJECTED/.test(action)) return 'danger';
+  if (/CHANGED|UPDATED/.test(action)) return 'warning';
+  return 'primary';
+}
 
 export default function AuditLogs() {
   const list = useListQuery('/audit-logs', { limit: 20, initialSort: '-timestamp' });
@@ -81,22 +91,13 @@ export default function AuditLogs() {
               label: 'Action',
               sortKey: 'action',
               render: (l) => (
-                <Badge
-                  tone={
-                    /FAILED|DELETED|DEACTIVATED|REJECTED/.test(l.action)
-                      ? 'danger'
-                      : /CHANGED|UPDATED/.test(l.action)
-                        ? 'warning'
-                        : 'primary'
-                  }
-                >
-                  {titleCase(l.action.toLowerCase())}
-                </Badge>
+                <Badge tone={actionTone(l.action)}>{titleCase(l.action.toLowerCase())}</Badge>
               ),
             },
             {
               key: 'entity',
               label: 'Entity',
+              // Show only the last 6 characters of the long id
               render: (l) => (l.entity ? `${l.entity}${l.entityId ? ` · …${l.entityId.slice(-6)}` : ''}` : '—'),
             },
             { key: 'ip', label: 'IP', render: (l) => <span className="faint small">{l.ip || '—'}</span> },

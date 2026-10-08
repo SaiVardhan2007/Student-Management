@@ -1,7 +1,9 @@
+// Writes entries to the audit log (who did what). Services call audit() after important actions.
 import type { Ctx } from '@/lib/context';
 import { AuditLog } from '@/models';
 import { logger } from '@/lib/logger';
 
+// Any field whose name matches this is hidden before it is saved in the log.
 const SENSITIVE = /pass|token|secret/i;
 
 function scrub(obj) {

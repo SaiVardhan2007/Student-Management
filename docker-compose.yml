@@ -39,6 +39,12 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-1}
       ALLOW_DEMO_SEED: ${ALLOW_DEMO_SEED:-false}
       SEED_PASSWORD: ${SEED_PASSWORD:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     volumes:
       - uploads:/data/uploads
     read_only: true

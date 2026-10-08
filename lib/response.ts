@@ -1,3 +1,4 @@
+// The result object services return (status + JSON body + cookies) and the ok()/created() helpers that build it.
 type CookieOpts = { httpOnly?: boolean; sameSite?: 'strict' | 'lax' | 'none'; secure?: boolean; path?: string; maxAge?: number };
 
 /** A JSON API result (status + envelope + cookies). Services return this; `route()` turns it into a Response. */

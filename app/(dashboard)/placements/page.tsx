@@ -1,5 +1,9 @@
 'use client';
 
+// Placements. Students browse job openings, apply, and track their applications.
+// Admin manages jobs, companies and application statuses.
+// Uses /placements/jobs, /placements/companies and /placements/applications.
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -15,6 +19,18 @@ const APP_STATUS = ['applied', 'shortlisted', 'assessment', 'interview', 'select
   label: titleCase(s),
 }));
 
+// What a student sees in the "Your status" column: application status, "Eligible", or why they cannot apply.
+function JobStatus({ job }: any) {
+  if (job.applicationStatus) return <Badge value={job.applicationStatus} />;
+  if (job.eligible) return <Badge tone="success">Eligible</Badge>;
+  return (
+    <span className="small" style={{ color: 'var(--danger)' }}>
+      {job.reasons?.[0]}
+    </span>
+  );
+}
+
+// Student tab: open jobs with an Apply button (disabled when not eligible).
 function StudentJobs() {
   const list = useListQuery('/placements/jobs', { limit: 10 });
   const apply = async (j) => {
@@ -49,7 +65,7 @@ function StudentJobs() {
             label: 'Eligibility',
             render: (j) => (
               <div className="small">
-                Min CGPA {j.eligibility?.minCgpa || 0}
+                Min CGPA {j.eligibility?.minCgpa || 0} · Max backlogs {j.eligibility?.maxActiveBacklogs ?? 0}
                 {j.eligibility?.programs?.length ? ` · ${j.eligibility.programs.map((p) => p.code).join(', ')}` : ''}
               </div>
             ),
@@ -58,16 +74,7 @@ function StudentJobs() {
           {
             key: 'state',
             label: 'Your status',
-            render: (j) =>
-              j.applicationStatus ? (
-                <Badge value={j.applicationStatus} />
-              ) : j.eligible ? (
-                <Badge tone="success">Eligible</Badge>
-              ) : (
-                <span className="small" style={{ color: 'var(--danger)' }}>
-                  {j.reasons?.[0]}
-                </span>
-              ),
+            render: (j) => <JobStatus job={j} />,
           },
         ]}
         rows={list.items}
@@ -90,6 +97,7 @@ function StudentJobs() {
   );
 }
 
+// Application list. Admin sees every student and can change the status; a student sees only their own, read only.
 function Applications({ admin }: any) {
   const list = useListQuery('/placements/applications', { limit: 15 });
   const change = async (a, status) => {
@@ -155,6 +163,7 @@ function Applications({ admin }: any) {
   );
 }
 
+// Settings for the generic ResourcePage (admin only): companies and job openings.
 const COMPANIES = {
   title: 'Companies',
   endpoint: '/placements/companies',
@@ -180,7 +189,7 @@ const JOBS = {
   createLabel: 'Add opening',
   defaultSort: '-deadline',
   modalSize: 'lg',
-  defaults: { eligibility: { minCgpa: '0' } },
+  defaults: { eligibility: { minCgpa: '0', maxActiveBacklogs: '0' } },
   fields: [
     { name: 'company', label: 'Company', type: 'select', required: true, optionsUrl: '/placements/companies' },
     { name: 'title', label: 'Role title', required: true },
@@ -188,6 +197,7 @@ const JOBS = {
     { name: 'package', label: 'Package (per year)', type: 'number', min: 0 },
     { name: 'deadline', label: 'Application deadline', type: 'date', required: true },
     { name: 'eligibility.minCgpa', label: 'Minimum CGPA', type: 'number', min: 0, max: 10, step: 0.1 },
+    { name: 'eligibility.maxActiveBacklogs', label: 'Max active backlogs', type: 'number', min: 0, step: 1 },
     {
       name: 'eligibility.programs',
       label: 'Eligible programs (empty = all)',
@@ -223,6 +233,7 @@ const JOBS = {
 
 export default function Placements() {
   const { user } = useAuth();
+  // Admin starts on the jobs tab, students on openings
   const [tab, setTab] = useState(user.role === 'admin' ? 'jobs' : 'openings');
   if (user.role === 'student') {
     return (

@@ -1,3 +1,4 @@
+// Types for the `ctx` object that every service function receives from route() in lib/api.ts.
 import type { UploadedFile } from './upload';
 
 export type Role = 'admin' | 'faculty' | 'student' | 'parent';

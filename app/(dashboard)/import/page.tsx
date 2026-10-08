@@ -1,16 +1,22 @@
 'use client';
 
+// Bulk import of students from a CSV file (admin only), in three steps: upload the file, preview
+// the validation results, then confirm. Nothing is saved until the confirm step.
+// APIs: /import/students/template, /import/students/preview, /import/students/confirm
+
 import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
 import { api, downloadFrom, errorMessage } from '@/lib/api-client';
 import { Alert, Badge, Button, Card, PageHeader, StatCard } from '@/components/ui';
 import { fileProblem } from '@/lib/validation';
+import { cell } from '@/lib/csv';
 
+/** Builds a CSV of the new students' temporary passwords and downloads it in the browser. */
 function downloadCredentials(created) {
   const rows = [
     'Student ID,Name,Email,Temporary Password',
-    ...created.map((c) => [c.studentId, c.name, c.email, c.temporaryPassword].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')),
+    ...created.map((c) => [c.studentId, c.name, c.email, c.temporaryPassword].map(cell).join(',')),
   ];
   const url = URL.createObjectURL(new Blob([rows.join('\r\n')], { type: 'text/csv' }));
   const a = document.createElement('a');
@@ -24,13 +30,13 @@ function downloadCredentials(created) {
 
 export default function Import() {
   const input = useRef(null);
-  const [step, setStep] = useState('upload'); // upload | preview | done
+  const [step, setStep] = useState('upload'); // 'upload', 'preview' or 'done'
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
   const [showAll, setShowAll] = useState(false);
-  const [over, setOver] = useState(false);
+  const [over, setOver] = useState(false); // true while a file is dragged over the drop area
 
   const upload = async (file) => {
     setError('');
@@ -50,7 +56,7 @@ export default function Import() {
     }
   };
 
-  const confirm = async () => {
+  const confirmImport = async () => {
     setBusy(true);
     try {
       const res = await api.post('/import/students/confirm', { importId: preview.importId });
@@ -74,7 +80,11 @@ export default function Import() {
     if (input.current) input.current.value = '';
   };
 
-  const rows = preview ? (showAll ? preview.rows : preview.rows.filter((r) => !r.valid)) : [];
+  // By default only the invalid rows are listed, so the problems are easy to spot.
+  let rows = [];
+  if (preview) {
+    rows = showAll ? preview.rows : preview.rows.filter((r) => !r.valid);
+  }
 
   return (
     <div className="page">
@@ -101,7 +111,9 @@ export default function Import() {
             role="button"
             tabIndex={0}
             onClick={() => input.current?.click()}
-            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') input.current?.click();
+            }}
             onDragOver={(e) => {
               e.preventDefault();
               setOver(true);
@@ -110,7 +122,8 @@ export default function Import() {
             onDrop={(e) => {
               e.preventDefault();
               setOver(false);
-              e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]);
+              const file = e.dataTransfer.files[0];
+              if (file) upload(file);
             }}
           >
             {busy ? (
@@ -126,7 +139,11 @@ export default function Import() {
               </>
             )}
           </div>
-          <input ref={input} type="file" accept=".csv,text/csv" hidden onChange={(e) => e.target.files[0] && upload(e.target.files[0])} />
+          <input ref={input} type="file" accept=".csv,text/csv" hidden onChange={(e) => {
+              const file = e.target.files[0];
+              if (file) upload(file);
+            }}
+          />
         </Card>
       )}
 
@@ -204,7 +221,7 @@ export default function Import() {
             <Button onClick={reset} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={confirm} loading={busy} disabled={!preview.validCount}>
+            <Button variant="primary" onClick={confirmImport} loading={busy} disabled={!preview.validCount}>
               Import {preview.validCount} student{preview.validCount === 1 ? '' : 's'}
             </Button>
           </div>

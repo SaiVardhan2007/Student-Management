@@ -1,17 +1,20 @@
+// Next.js settings: security headers (Content-Security-Policy etc.) and server build options.
 import type { NextConfig } from 'next';
 
+// Razorpay Checkout loads its script from checkout.razorpay.com and runs inside an iframe from api.razorpay.com.
 // Next.js needs inline bootstrap scripts (and eval for hot reload in development); everything else stays same-origin.
 const isDev = process.env.NODE_ENV !== 'production';
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+  `script-src 'self' 'unsafe-inline' https://checkout.razorpay.com${isDev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://*.razorpay.com",
   "font-src 'self' data:",
-  `connect-src 'self'${isDev ? ' ws: wss:' : ''}`,
+  "frame-src https://api.razorpay.com https://checkout.razorpay.com",
+  `connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com${isDev ? ' ws: wss:' : ''}`,
   "frame-ancestors 'self'",
   "base-uri 'self'",
-  "form-action 'self'",
+  "form-action 'self' https://api.razorpay.com",
 ].join('; ');
 
 const nextConfig: NextConfig = {

@@ -1,8 +1,11 @@
 'use client';
 
+// Small reusable React hooks: debounced values, data fetching, paginated lists, toggles and click-outside.
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '@/lib/api-client';
 
+/** Returns `value` only after it has stopped changing for `delay` ms (used so search boxes don't call the API on every keystroke). */
 export function useDebounce<T>(value: T, delay = 350) {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -42,26 +45,33 @@ export function useListQuery(
   url: string,
   { limit = 15, initialFilters = {}, initialSort }: { limit?: number; initialFilters?: Record<string, any>; initialSort?: string } = {}
 ) {
-  const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<string | undefined>(initialSort);
   const [filters, setFilters] = useState<Record<string, any>>(initialFilters);
   const debounced = useDebounce(search);
 
-  const params: Record<string, any> = { page, limit, sort, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v != null)) };
+  // The page belongs to the query it was chosen for: when search/sort/filters change, we are back on page 1
+  // (derived here instead of reset in an effect, so there is no extra render with a stale page).
+  const queryKey = JSON.stringify([debounced, sort, filters]);
+  const [pageState, setPageState] = useState({ key: queryKey, page: 1 });
+  const page = pageState.key === queryKey ? pageState.page : 1;
+  const setPage = (p: number) => setPageState({ key: queryKey, page: p });
+
+  const params: Record<string, any> = { page, limit, sort };
+  for (const [name, value] of Object.entries(filters)) {
+    if (value !== '' && value != null) params[name] = value;
+  }
   if (debounced) params.search = debounced;
   const q = useFetch(url, params);
-
-  // go back to page 1 whenever the query changes
-  useEffect(() => {
-    setPage(1);
-  }, [debounced, sort, filters]);
+  // the search and filters without paging: used to export "what the table shows"
+  const { page: _page, limit: _limit, sort: _sort, ...queryParams } = params;
 
   return {
     ...q,
     items: q.data || [],
     page,
     setPage,
+    queryParams,
     search,
     setSearch,
     sort,
@@ -76,6 +86,7 @@ export function useListQuery(
   };
 }
 
+/** A true/false state with a flip function: returns [on, toggle, setOn]. */
 export function useToggle(initial = false) {
   const [on, setOn] = useState(initial);
   return [on, useCallback(() => setOn((v) => !v), []), setOn];

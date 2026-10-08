@@ -1,3 +1,4 @@
+// In-app notifications of the logged-in user (users only ever touch their own).
 import { Notification } from '@/models';
 import { AppError } from '@/lib/errors';
 import { ok } from '@/lib/response';

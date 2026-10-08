@@ -1,14 +1,17 @@
+// Attendance service: marking attendance, class rosters/reports, a student's history, and correction requests.
+// The percentage maths lives in services/attendance.ts.
 import type { Ctx } from '@/lib/context';
 import { Attendance, AttendanceCorrection, Enrollment, Student, Subject, Section, getSettings } from '@/models';
 import { AppError } from '@/lib/errors';
 import { ok, created } from '@/lib/response';
 import { toDay, requireValidId, paginate } from '@/lib/query';
 import { studentProfile, facultyProfile } from '@/lib/auth';
-import { assertSubjectAccess, assertStudentAccess, ownStudentIds } from '@/services/access';
+import { assertSubjectAccess, assertStudentAccess, ownStudentIds, facultySubjectIds } from '@/services/access';
 import { summarize, subjectPercentages, percentage } from '@/services/attendance';
 import { notifyUsers } from '@/services/notify';
 import { audit } from '@/services/audit';
 
+// Convert an optional query value to a day (or undefined when it is missing).
 const optDay = (v) => (v ? toDay(v) : undefined);
 
 /** Sections a subject is taught to (explicit list, or all sections of program+semester). */
@@ -44,18 +47,16 @@ async function buildRoster(subject, sectionId, date) {
     .lean();
   const existing = date ? await Attendance.find({ subject: subject._id, date, student: { $in: students.map((s) => s._id) } }).lean() : [];
   const byStudent = new Map(existing.map((a) => [String(a.student), a]));
-  return students.map((s) => ({
-    ...s,
-    attendance: byStudent.get(String(s._id))
-      ? {
-          _id: byStudent.get(String(s._id))._id,
-          status: byStudent.get(String(s._id)).status,
-          remarks: byStudent.get(String(s._id)).remarks,
-        }
-      : null,
-  }));
+  return students.map((student) => {
+    const record = byStudent.get(String(student._id));
+    return {
+      ...student,
+      attendance: record ? { _id: record._id, status: record.status, remarks: record.remarks } : null,
+    };
+  });
 }
 
+/** Student list of one class for a date, with any attendance already saved. */
 export async function roster(ctx: Ctx) {
   const { subject: subjectId, section, date } = ctx.query;
   requireValidId(subjectId, 'subject');
@@ -65,6 +66,7 @@ export async function roster(ctx: Ctx) {
   return ok({ date: day, students: await buildRoster(subject, section, day) });
 }
 
+/** Save attendance for a class on one day. Only records that changed are written. */
 export async function mark(ctx: Ctx) {
   const { subject: subjectId, section, date, records } = ctx.body;
   const subject = await assertSubjectAccess(ctx, subjectId);
@@ -82,8 +84,8 @@ export async function mark(ctx: Ctx) {
     seen.add(r.student);
   }
   // every student must belong to the section and be enrolled in the subject
-  const roster = await buildRoster(subject, section, day);
-  const allowed = new Map(roster.map((s) => [String(s._id), s]));
+  const classRoster = await buildRoster(subject, section, day);
+  const allowed = new Map(classRoster.map((s) => [String(s._id), s]));
   const invalid = records.filter((r) => !allowed.has(r.student));
   if (invalid.length)
     throw AppError.badRequest(
@@ -91,17 +93,22 @@ export async function mark(ctx: Ctx) {
       invalid.map((i) => ({ field: 'records', message: `Student ${i.student} is not in this class` }))
     );
 
+  // build one database write per record, skipping records that did not change
   const ops = [];
+  const newlyAbsent = []; // students whose saved record is newly 'absent' (only these get a warning)
   let changed = 0;
   for (const r of records) {
     const prev = allowed.get(r.student).attendance;
-    if (prev && prev.status === r.status && (prev.remarks || '') === (r.remarks || '')) continue;
+    const unchanged = prev && prev.status === r.status && (prev.remarks || '') === (r.remarks || '');
+    if (unchanged) continue;
     changed++;
+    if (r.status === 'absent' && prev?.status !== 'absent') newlyAbsent.push(r.student);
     ops.push({
       updateOne: {
         filter: { subject: subject._id, student: r.student, date: day },
         update: {
-          $set: { status: r.status, remarks: r.remarks, section, ...(prev ? { modifiedBy: ctx.user._id, modifiedAt: new Date() } : {}) },
+          $set: { status: r.status, section, ...(r.remarks ? { remarks: r.remarks } : {}), ...(prev ? { modifiedBy: ctx.user._id, modifiedAt: new Date() } : {}) },
+          ...(r.remarks ? {} : { $unset: { remarks: '' } }),
           $setOnInsert: { markedBy: ctx.user._id },
         },
         upsert: true,
@@ -109,21 +116,21 @@ export async function mark(ctx: Ctx) {
     });
   }
   if (ops.length) await Attendance.bulkWrite(ops, { ordered: false });
-  await audit(ctx, prev_changed(roster) ? 'ATTENDANCE_CHANGED' : 'ATTENDANCE_MARKED', 'Attendance', subject._id, {
+  // if any attendance already existed for this day, this save is an edit
+  const alreadyMarked = classRoster.some((s) => s.attendance);
+  await audit(ctx, alreadyMarked ? 'ATTENDANCE_CHANGED' : 'ATTENDANCE_MARKED', 'Attendance', subject._id, {
     date: day,
     section,
     changed,
     total: records.length,
   });
 
-  // attendance warnings for absent students who dropped below the threshold
-  const absentIds = records.filter((r) => r.status === 'absent').map((r) => r.student);
-  if (absentIds.length) warnLowAttendance(subject, absentIds).catch(() => {});
+  // warn absent students whose percentage dropped below the threshold; runs in the background and must not fail the request
+  if (newlyAbsent.length) warnLowAttendance(subject, newlyAbsent).catch(() => {});
   return ok({ saved: changed, unchanged: records.length - changed }, 'Attendance saved');
 }
 
-const prev_changed = (roster) => roster.some((s) => s.attendance);
-
+// Notify students whose attendance in this subject is now below the threshold from settings.
 async function warnLowAttendance(subject, studentIds) {
   const settings = await getSettings();
   const pcts = await subjectPercentages(subject._id, studentIds);
@@ -146,6 +153,7 @@ async function warnLowAttendance(subject, studentIds) {
   );
 }
 
+// 'me' means the logged-in student; otherwise check the user is allowed to view that student.
 async function resolveStudentId(ctx) {
   const { id } = ctx.params;
   if (id === 'me') {
@@ -157,12 +165,16 @@ async function resolveStudentId(ctx) {
   return id;
 }
 
+/** Attendance summary (overall, per subject, per month) for one student. */
 export async function studentSummary(ctx: Ctx) {
   const studentId = await resolveStudentId(ctx);
   const { from, to, subject } = ctx.query;
-  return ok(await summarize(studentId, { from: optDay(from), to: optDay(to), subject }));
+  // faculty only see attendance for the subjects they teach
+  const subjectIds = ctx.user.role === 'faculty' ? await facultySubjectIds(ctx) : undefined;
+  return ok(await summarize(studentId, { from: optDay(from), to: optDay(to), subject, subjectIds }));
 }
 
+/** Day-by-day attendance records of one student (paginated). */
 export async function studentHistory(ctx: Ctx) {
   const studentId = await resolveStudentId(ctx);
   const { from, to, subject } = ctx.query;
@@ -174,7 +186,11 @@ export async function studentHistory(ctx: Ctx) {
     const mine = await Subject.find({ faculty: (await facultyProfile(ctx))._id })
       .select('_id')
       .lean();
-    filter.subject = subject ? (mine.some((m) => String(m._id) === subject) ? subject : null) : { $in: mine.map((m) => m._id) };
+    if (!subject) {
+      filter.subject = { $in: mine.map((m) => m._id) };
+    } else if (!mine.some((m) => String(m._id) === subject)) {
+      filter.subject = null; // not their subject, so match nothing
+    }
   }
   const { items, meta } = await paginate(Attendance, ctx, {
     filter,
@@ -191,14 +207,17 @@ export async function classReport(ctx: Ctx) {
   const { subject: subjectId, section, from, to } = ctx.query;
   requireValidId(subjectId, 'subject');
   const subject = await assertSubjectAccess(ctx, subjectId);
-  const students = await buildRoster(subject, section && requireValidId(section, 'section'), null).catch(() => []);
-  const list = section
-    ? students
-    : await Student.find({
-        _id: { $in: (await Enrollment.find({ subject: subject._id, status: 'enrolled' }).select('student').lean()).map((e) => e.student) },
-      })
-        .select('studentId firstName lastName')
-        .lean();
+  let list;
+  if (section) {
+    requireValidId(section, 'section');
+    list = await buildRoster(subject, section, null).catch(() => []);
+  } else {
+    // no section given: report on every student enrolled in the subject
+    const enrolled = await Enrollment.find({ subject: subject._id, status: 'enrolled' }).select('student').lean();
+    list = await Student.find({ _id: { $in: enrolled.map((e) => e.student) } })
+      .select('studentId firstName lastName')
+      .lean();
+  }
   const settings = await getSettings();
   const pcts = await subjectPercentages(
     subject._id,
@@ -219,6 +238,7 @@ export async function classReport(ctx: Ctx) {
 }
 
 // ---------------- corrections ----------------
+/** A student asks the faculty to change one of their attendance records. */
 export async function requestCorrection(ctx: Ctx) {
   const s = await studentProfile(ctx);
   const { attendance: attendanceId, requestedStatus, reason } = ctx.body;
@@ -240,6 +260,7 @@ export async function requestCorrection(ctx: Ctx) {
   return created(c, 'Correction request submitted');
 }
 
+/** Correction requests the user may see (own, children's, or for the faculty's subjects). */
 export async function listCorrections(ctx: Ctx) {
   const filter: Record<string, any> = {};
   if (ctx.query.status) filter.status = String(ctx.query.status);
@@ -263,6 +284,7 @@ export async function listCorrections(ctx: Ctx) {
   return ok(items, 'OK', 200, meta);
 }
 
+/** Faculty approves or rejects a correction. Approving updates the attendance record. */
 export async function reviewCorrection(ctx: Ctx) {
   requireValidId(ctx.params.id);
   const c = await AttendanceCorrection.findById(ctx.params.id);

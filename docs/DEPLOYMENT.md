@@ -93,8 +93,13 @@ Roll back by checking out the previous version and running the same command. Tak
 
 ### Password-reset links
 
-No email service is configured by design. A reset request prints its link (valid 30 minutes) to the application log, which an
-administrator can read and pass to the user. Wire up SMTP in `services/auth.service.ts` if you later want email.
+Password-reset links and faculty approval notices are sent by SMTP. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
+`SMTP_PASS` and `MAIL_FROM` in `.env`. With `SMTP_HOST` empty, mails are only printed to the application log (and, outside
+production, the reset link is shown on the forgot-password page).
+
+Accounts: the admin is created with `create-admin`; students are added by the admin (admission number + email) and then sign up
+themselves; faculty sign up and are approved or rejected under **User accounts**. Students reset their password with email +
+admission number; if the email on file is wrong, the admin edits it on the student record.
 
 ### Tuning
 

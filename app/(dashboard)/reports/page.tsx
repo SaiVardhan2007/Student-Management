@@ -1,15 +1,22 @@
 'use client';
 
+// Reports for admin and faculty: pick a report type, filter it, view a table and export CSV or PDF.
+// Faculty only get the reports not marked admin: true. Uses /reports/:type.
+
 import { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useDebounce, useFetch } from '@/hooks';
 import { downloadFrom, errorMessage } from '@/lib/api-client';
-import { Button, Card, EmptyState, ErrorState, Field, PageHeader, TableSkeleton, Tabs } from '@/components/ui';
+import { Alert, Button, Card, EmptyState, ErrorState, Field, PageHeader, TableSkeleton, Tabs } from '@/components/ui';
 import { Pagination } from '@/components/ui/data-table';
+import { OptionSearch, useSearchableOptions } from '@/components/ui/dynamic-form';
 import { SEMESTERS, STATUSES } from '@/lib/constants';
 
+// Shortcut for a dropdown filter with a fixed list of options
 const sel = (label, name, options) => ({ label, name, type: 'select', options });
+// One entry per report tab. filters: dropdowns above the table (a filter with url loads its options from the API,
+// mine: true limits them to the faculty's own subjects). dates: label for the date range. admin: true hides the tab from faculty.
 const REPORTS = {
   students: {
     label: 'Students',
@@ -110,11 +117,19 @@ const REPORTS = {
   },
 };
 
+// One dropdown filter. Options are either fixed (f.options) or fetched from f.url.
 function FilterControl({ f, value, onChange }: any) {
-  const remote = useFetch(f.url || null, { limit: 100, ...(f.mine ? { mine: 'true' } : {}) }, { enabled: !!f.url });
-  const options = f.url ? (remote.data || []).map((o) => ({ value: o._id, label: f.code ? o.code : o.name })) : f.options;
+  // Remote lists load the first 100 records and can be searched, so records beyond 100 stay selectable
+  const remote = useSearchableOptions(
+    { optionsUrl: f.url, optionsParams: f.mine ? { mine: 'true' } : undefined, optionLabel: (o) => (f.code ? o.code : o.name), options: f.options },
+    value ? [value] : []
+  );
+  const options = remote.options;
   return (
     <Field label={f.label} htmlFor={`rf-${f.name}`}>
+      {remote.searchable && (
+        <OptionSearch query={remote.query} onChange={remote.setQuery} total={remote.total} shown={remote.opts.length} label={f.label} />
+      )}
       <select id={`rf-${f.name}`} className="select" value={value || ''} onChange={(e) => onChange(e.target.value)}>
         <option value="">All</option>
         {options.map((o) => (
@@ -125,6 +140,13 @@ function FilterControl({ f, value, onChange }: any) {
       </select>
     </Field>
   );
+}
+
+// Turns a report value into table text: empty or object values become a dash, ISO dates are cut to YYYY-MM-DD.
+function cellText(value) {
+  if (value instanceof Object || value == null) return '—';
+  const isIsoDate = /^\d{4}-\d{2}-\d{2}T/.test(value);
+  return String(isIsoDate ? value.slice(0, 10) : value);
 }
 
 export default function Reports() {
@@ -140,12 +162,14 @@ export default function Reports() {
   const debounced = useDebounce(search);
 
   const cfg = REPORTS[type];
+  // Only send filters that have a value. useMemo keeps the object stable so useFetch does not refetch needlessly.
   const params = useMemo(
     () => ({ ...Object.fromEntries(Object.entries({ ...filters, ...range, search: debounced }).filter(([, v]) => v)), page, limit: 25 }),
     [filters, range, debounced, page]
   );
   const { data, meta, loading, error, reload } = useFetch(`/reports/${type}`, params);
 
+  // Switching report type resets every filter
   const change = (t) => {
     setType(t);
     setFilters({});
@@ -153,6 +177,7 @@ export default function Reports() {
     setSearch('');
     setPage(1);
   };
+  // Any filter change goes back to page 1
   const setF = (k, v) => {
     setFilters((f) => ({ ...f, [k]: v }));
     setPage(1);
@@ -160,8 +185,10 @@ export default function Reports() {
   const download = async (format) => {
     setBusy(format);
     try {
+      // Exports include all rows, so leave out the paging values
       const { page: _p, limit: _l, ...rest } = params;
-      await downloadFrom(`/reports/${type}`, { ...rest, format }, `${type}-report.${format}`);
+      const { truncated } = await downloadFrom(`/reports/${type}`, { ...rest, format }, `${type}-report.${format}`);
+      if (truncated) toast(`The ${format.toUpperCase()} only contains the first ${meta?.exportLimit ?? ''} rows. Narrow the filters to export the rest.`, { icon: '⚠️' });
     } catch (e) {
       toast.error(errorMessage(e, 'Unable to generate the report.'));
     } finally {
@@ -234,6 +261,12 @@ export default function Reports() {
           )}
         </div>
       </Card>
+      {meta?.truncated && (
+        <Alert tone="warning">
+          This report has {meta.total} rows, but CSV and PDF exports are limited to the first {meta.exportLimit}. Narrow the filters to export
+          everything.
+        </Alert>
+      )}
       <Card bodyClass={null}>
         {error ? (
           <ErrorState message={error} onRetry={reload} />
@@ -242,6 +275,7 @@ export default function Reports() {
         ) : !data?.rows.length ? (
           <EmptyState icon="chart" title="No data for these filters" />
         ) : (
+          // Dim the old rows while a new page is loading
           <div style={{ opacity: loading ? 0.6 : 1 }}>
             <div className="table-wrap">
               <table className="table responsive">
@@ -257,9 +291,7 @@ export default function Reports() {
                     <tr key={i}>
                       {data.columns.map((c) => (
                         <td key={c} data-label={c}>
-                          {r[c] instanceof Object || r[c] == null
-                            ? '—'
-                            : String(/^\d{4}-\d{2}-\d{2}T/.test(r[c]) ? r[c].slice(0, 10) : r[c])}
+                          {cellText(r[c])}
                         </td>
                       ))}
                     </tr>

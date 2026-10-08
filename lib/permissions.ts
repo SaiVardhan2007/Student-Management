@@ -1,3 +1,4 @@
+// Which roles may open which pages. Used by proxy.ts (page gate) and the sidebar.
 import type { Role } from './context';
 
 export const ROLES: Role[] = ['admin', 'faculty', 'student', 'parent'];

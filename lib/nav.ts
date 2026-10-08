@@ -1,4 +1,6 @@
+// Sidebar menu definition and page titles for the breadcrumb.
 import type { Role } from './context';
+import { ALL } from './permissions';
 
 export interface NavItem {
   href: string;
@@ -13,11 +15,8 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-const ALL: Role[] = ['admin', 'faculty', 'student', 'parent'];
-
 /**
- * Sidebar navigation, grouped by what people are trying to do and filtered by role.
- * Every entry maps to a page that existed before the migration — nothing is added or removed.
+ * Sidebar navigation grouped by topic. Each item lists the roles that can see it.
  */
 export const NAV: NavGroup[] = [
   {

@@ -1,5 +1,8 @@
 'use client';
 
+// Home page. Shows a different dashboard for each role: admin, faculty, or student/parent (the parent
+// view reuses the student dashboard). Data comes from /dashboard/admin, /dashboard/faculty and /dashboard/student.
+
 import { useState } from 'react';
 import Link from 'next/link';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -10,6 +13,7 @@ import { fmtDate, fmtDateTime, titleCase } from '@/lib/format';
 
 const CHART_COLOR = '#2563eb';
 
+// Wraps a chart so it fills its container, or shows an empty message when there is nothing to plot.
 function ChartBox({ children, empty }: any) {
   if (empty) return <EmptyState icon="chart" title="No data yet" message="Charts appear once data has been recorded." />;
   return (
@@ -21,20 +25,22 @@ function ChartBox({ children, empty }: any) {
   );
 }
 
+// ---------- Admin view ----------
 function AdminDashboard() {
   const { data, loading, error, reload } = useFetch('/dashboard/admin');
   if (error) return <ErrorState message={error} onRetry={reload} />;
   const c = data?.counts || {};
+
+  // Subtitle example: "2025-26 · Semester 3". A single space keeps the header height while loading.
+  let subtitle = ' ';
+  if (data) {
+    subtitle = data.currentYear?.name || 'No current academic year';
+    if (data.currentSemester) subtitle += ` · ${data.currentSemester.name}`;
+  }
+
   return (
     <div className="page">
-      <PageHeader
-        title="Admin dashboard"
-        subtitle={
-          data
-            ? `${data.currentYear?.name || 'No current academic year'}${data.currentSemester ? ` · ${data.currentSemester.name}` : ''}`
-            : ' '
-        }
-      />
+      <PageHeader title="Admin dashboard" subtitle={subtitle} />
       <div className="grid grid-stats">
         <StatCard label="Total students" value={c.totalStudents} sub={`${c.activeStudents ?? '—'} active`} loading={loading} />
         <StatCard label="Faculty" value={c.totalFaculty} loading={loading} />
@@ -162,6 +168,7 @@ function AdminDashboard() {
   );
 }
 
+// ---------- Faculty view ----------
 function FacultyDashboard() {
   const { data, loading, error, reload } = useFetch('/dashboard/faculty');
   if (error) return <ErrorState message={error} onRetry={reload} />;
@@ -260,10 +267,13 @@ function FacultyDashboard() {
   );
 }
 
+// ---------- Student / parent view ----------
 function StudentDashboard() {
   const { user } = useAuth();
   const isParent = user.role === 'parent';
+  // Only parents need the list of their children (for the child picker).
   const children = useFetch('/students', { limit: 50 }, { enabled: isParent });
+  // Empty means "let the server pick the default student for this account".
   const [childId, setChildId] = useState('');
   const { data, loading, error, reload } = useFetch('/dashboard/student', childId ? { student: childId } : undefined);
 
@@ -278,17 +288,23 @@ function StudentDashboard() {
     );
 
   const att = data?.attendance;
+  // Subjects where attendance is under the minimum percentage
   const low = att?.subjects?.filter((s) => s.belowThreshold) || [];
+
+  let title;
+  if (isParent) {
+    title = `Parent dashboard${data ? ` — ${data.student.name}` : ''}`;
+  } else {
+    title = `Welcome${data ? `, ${data.student.name.split(' ')[0]}` : ''}`;
+  }
+
   return (
     <div className="page">
       <PageHeader
-        title={
-          isParent
-            ? `Parent dashboard${data ? ` — ${data.student.name}` : ''}`
-            : `Welcome${data ? `, ${data.student.name.split(' ')[0]}` : ''}`
-        }
+        title={title}
         subtitle={data ? `${data.student.studentId} · Semester ${data.student.semester}` : ' '}
         actions={
+          // Child picker is only useful when the parent has more than one child
           isParent &&
           children.data?.length > 1 && (
             <select
@@ -356,6 +372,7 @@ function StudentDashboard() {
           <Card
             title="Upcoming assignments"
             actions={
+              // Parents cannot open assignment pages, so no links for them
               !isParent && (
                 <Link href="/assignments" className="small">
                   View all
@@ -414,6 +431,7 @@ function StudentDashboard() {
   );
 }
 
+// Picks the view that matches the logged-in user's role.
 export default function Dashboard() {
   const { user } = useAuth();
   if (user.role === 'admin') return <AdminDashboard />;

@@ -1,3 +1,4 @@
+// Form checks that run in the browser (password strength, file type and size) before anything is sent to the server.
 /** Mirrors the server password policy so users get instant feedback. */
 export function passwordProblem(p = '') {
   if (p.length < 8) return 'Password must be at least 8 characters';

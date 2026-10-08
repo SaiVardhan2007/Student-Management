@@ -57,7 +57,7 @@ export interface RequestConfig {
   _retry?: boolean;
 }
 
-/** Error shaped like the previous (axios) client so existing helpers keep working. */
+/** Error thrown for failed requests. Its fields (response, request, code) mimic axios errors. */
 export class ApiError extends Error {
   response?: { status: number; data: any };
   request?: boolean;
@@ -124,6 +124,7 @@ async function rawRequest(method: string, url: string, data?: unknown, config: R
   return { data: payload, status: res.status, headers: res.headers };
 }
 
+// holds the refresh call in progress so several 401s at once trigger only one refresh
 let refreshing: Promise<void> | null = null;
 
 /** Exchange the refresh cookie for a new access cookie. */
@@ -139,6 +140,7 @@ async function request(method: string, url: string, data?: unknown, config: Requ
   } catch (error: any) {
     const isAuthCall = url.startsWith('/auth/');
     if (error.response?.status === 401 && !config._retry && !isAuthCall && sessionHint.has) {
+      // access token expired: refresh once (shared by all parallel requests), then repeat this request
       try {
         refreshing =
           refreshing ||
@@ -214,7 +216,7 @@ export async function openFile(path: string, { download = false, name }: { downl
 }
 
 /** Download a generated file (CSV/PDF report) from an API endpoint. */
-export async function downloadFrom(url: string, params: Record<string, any> | undefined, filename: string) {
+export async function downloadFrom(url: string, params: Record<string, any> | undefined, filename: string): Promise<{ truncated: boolean }> {
   const res = await api.get(url, { params, responseType: 'blob' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(res.data);
@@ -223,6 +225,8 @@ export async function downloadFrom(url: string, params: Record<string, any> | un
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  // reports set this header when the file was cut at the export row limit
+  return { truncated: res.headers.get('x-report-truncated') === 'true' };
 }
 
 /** Fetch a protected image as an object URL (for avatars/logos). */

@@ -1,5 +1,8 @@
 'use client';
 
+// One student's details in tabs: profile, attendance, results and enrolled subjects.
+// Uses /students/:id and /students/:id/enrollments.
+
 import { useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useFetch } from '@/hooks';
@@ -18,8 +21,14 @@ export default function StudentDetail() {
   if (loading) return <PageLoader />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
 
+  // One label/value pair for a <dl>. Returns an array so rows can be spread into the list; shows a dash when empty.
   const row = (k, v) => [<dt key={`k${k}`}>{k}</dt>, <dd key={`v${k}`}>{v || '—'}</dd>];
-  const addr = s.address ? [s.address.line1, s.address.city, s.address.state, s.address.pincode].filter(Boolean).join(', ') : '';
+
+  // Join only the address parts that exist, e.g. "12 Main St, Hyderabad, Telangana"
+  let addr = '';
+  if (s.address) {
+    addr = [s.address.line1, s.address.city, s.address.state, s.address.pincode].filter(Boolean).join(', ');
+  }
 
   return (
     <div className="page">

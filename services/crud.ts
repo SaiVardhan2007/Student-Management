@@ -1,3 +1,5 @@
+// Generic create/read/update/delete service used by simple resources (departments, programs, exams...).
+// Route files call crud(options) and get ready-made list/get/create/update/remove functions.
 import type { Model } from 'mongoose';
 import { AppError } from '@/lib/errors';
 import { ok, created } from '@/lib/response';
@@ -28,9 +30,25 @@ export interface CrudOptions {
   beforeDelete?: (ctx: Ctx, doc: any) => Promise<unknown> | unknown;
 }
 
+const isPlain = (v: unknown): v is Record<string, any> =>
+  !!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
+
 /**
- * Generic CRUD service factory used by simple, configuration-style resources (departments, programs, exams…).
- * Returns plain service functions `(ctx) => ApiResult`; route files decide who may call them.
+ * Applies an update body to a document. A null value clears (unsets) the field, which is how the
+ * forms blank out an optional field; nested objects are applied field by field (address.city ...).
+ */
+export function applyUpdate(doc: any, body: Record<string, any>, prefix = '') {
+  for (const [key, value] of Object.entries(body || {})) {
+    const path = prefix + key;
+    if (value === null) doc.set(path, undefined);
+    else if (isPlain(value)) applyUpdate(doc, value, `${path}.`);
+    else doc.set(path, value);
+  }
+}
+
+/**
+ * Builds list/get/create/update/remove functions for one model from the options above.
+ * Each function takes the request context and returns an API result; route files decide who may call them.
  */
 export function crud(opts: CrudOptions) {
   const { Model, entity, searchFields = [], filterSpec = {}, allowedSort = [], defaultSort, populate, select } = opts;
@@ -49,6 +67,7 @@ export function crud(opts: CrudOptions) {
     return ok(items, 'OK', 200, meta);
   }
 
+  // Build the filter used to find one document: its id plus the scope rule (if any).
   const findScoped = async (ctx: Ctx) => {
     requireValidId(ctx.params.id);
     const scoped = opts.scope ? await opts.scope(ctx) : {};
@@ -75,7 +94,7 @@ export function crud(opts: CrudOptions) {
     const doc = await Model.findOne(await findScoped(ctx));
     if (!doc) throw AppError.notFound(`${entity} not found`);
     if (opts.beforeUpdate) await opts.beforeUpdate(ctx, doc);
-    doc.set(ctx.body);
+    applyUpdate(doc, ctx.body);
     await doc.save();
     if (opts.afterUpdate) await opts.afterUpdate(ctx, doc);
     await audit(ctx, `${entity.toUpperCase()}_UPDATED`, entity, doc._id, { fields: Object.keys(ctx.body) });
@@ -85,10 +104,13 @@ export function crud(opts: CrudOptions) {
   async function remove(ctx: Ctx) {
     const doc = await Model.findOne(await findScoped(ctx));
     if (!doc) throw AppError.notFound(`${entity} not found`);
-    for (const d of opts.dependents || []) {
-      const n = await d.Model.countDocuments({ [d.field]: doc._id });
-      if (n)
-        throw AppError.conflict(`Cannot delete ${entity.toLowerCase()}: it is used by ${n} ${d.label}. Remove or reassign them first.`);
+    // do not delete a document that other records still point to
+    for (const dependent of opts.dependents || []) {
+      const count = await dependent.Model.countDocuments({ [dependent.field]: doc._id });
+      if (count)
+        throw AppError.conflict(
+          `Cannot delete ${entity.toLowerCase()}: it is used by ${count} ${dependent.label}. Remove or reassign them first.`
+        );
     }
     if (opts.beforeDelete) await opts.beforeDelete(ctx, doc);
     await doc.deleteOne();

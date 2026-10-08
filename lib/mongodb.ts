@@ -1,3 +1,4 @@
+// MongoDB connection helper shared by API routes, scripts and tests.
 import mongoose from 'mongoose';
 import { env } from './env';
 import { logger } from './logger';

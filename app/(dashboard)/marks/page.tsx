@@ -1,5 +1,8 @@
 'use client';
 
+// Marks page for faculty and admin: enter marks per subject and exam component, and see class performance.
+// Uses /subjects, /marks/subject/:id, /marks/subject/:id/performance and POST /marks.
+
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useFetch } from '@/hooks';
@@ -10,15 +13,34 @@ import { useAuth } from '@/components/providers/auth-provider';
 
 const TYPES = ['assignment', 'quiz', 'internal', 'practical', 'mid', 'final'];
 
+// Subject dropdown used by both tabs.
+function SubjectSelect({ id, value, onChange, subjects }: any) {
+  return (
+    <Field label="Subject" htmlFor={id}>
+      <select id={id} className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select subject</option>
+        {subjects.map((s) => (
+          <option key={s._id} value={s._id}>
+            {s.code} — {s.name}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+// "Enter marks" tab: one mark box per enrolled student for the chosen subject and component.
 function Entry({ subjects }: any) {
   const [subject, setSubject] = useState('');
   const [examType, setExamType] = useState('internal');
   const [maxMarks, setMaxMarks] = useState('');
   const sheet = useFetch(`/marks/subject/${subject}`, { examType }, { enabled: !!subject });
+  // values: typed mark per student id (as text). errors: validation message per student id.
   const [values, setValues] = useState<any>({});
   const [errors, setErrors] = useState<any>({});
   const [saving, setSaving] = useState(false);
 
+  // When a sheet loads (or the component changes), fill the boxes with marks already saved in the database.
   useEffect(() => {
     if (!sheet.data) return;
     const v: Record<string, any> = {};
@@ -30,7 +52,8 @@ function Entry({ subjects }: any) {
     }
     setValues(v);
     setErrors({});
-    setMaxMarks((cur) => max || cur);
+    // Use the saved max marks if there are any, otherwise clear it (never keep another subject's max)
+    setMaxMarks(max);
   }, [sheet.data, examType]);
 
   const students = sheet.data?.students || [];
@@ -42,7 +65,7 @@ function Entry({ subjects }: any) {
     const records = [];
     for (const s of students) {
       const raw = values[s._id];
-      if (raw === '' || raw == null) continue;
+      if (raw === '' || raw == null) continue; // blank means "skip this student"
       const n = Number(raw);
       if (Number.isNaN(n) || n < 0) errs[s._id] = 'Invalid';
       else if (n > max) errs[s._id] = `Max ${max}`;
@@ -67,16 +90,7 @@ function Entry({ subjects }: any) {
     <Card title="Enter marks" bodyClass={null}>
       <div className="card-body">
         <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-          <Field label="Subject" htmlFor="m-sub">
-            <select id="m-sub" className="select" value={subject} onChange={(e) => setSubject(e.target.value)}>
-              <option value="">Select subject</option>
-              {subjects.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.code} — {s.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <SubjectSelect id="m-sub" value={subject} onChange={setSubject} subjects={subjects} />
           <Field label="Component" htmlFor="m-type">
             <select id="m-type" className="select" value={examType} onChange={(e) => setExamType(e.target.value)}>
               {TYPES.map((t) => (
@@ -166,22 +180,14 @@ function Entry({ subjects }: any) {
   );
 }
 
+// "Class performance" tab: summary numbers and grade counts for one subject.
 function Performance({ subjects }: any) {
   const [subject, setSubject] = useState('');
   const { data, loading, error, reload } = useFetch(`/marks/subject/${subject}/performance`, undefined, { enabled: !!subject });
   return (
     <div className="stack">
       <Card>
-        <Field label="Subject" htmlFor="p-sub">
-          <select id="p-sub" className="select" value={subject} onChange={(e) => setSubject(e.target.value)}>
-            <option value="">Select subject</option>
-            {subjects.map((s) => (
-              <option key={s._id} value={s._id}>
-                {s.code} — {s.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <SubjectSelect id="p-sub" value={subject} onChange={setSubject} subjects={subjects} />
       </Card>
       {!subject ? (
         <EmptyState icon="chart" title="Select a subject to see class performance" />
@@ -223,6 +229,7 @@ export default function Marks() {
     loading,
     error,
     reload,
+    // Faculty only get the subjects assigned to them; admin gets all
   } = useFetch('/subjects', { mine: user.role === 'faculty' ? 'true' : undefined, limit: 100, sort: 'code' });
   if (loading) return <PageLoader />;
   if (error) return <ErrorState message={error} onRetry={reload} />;

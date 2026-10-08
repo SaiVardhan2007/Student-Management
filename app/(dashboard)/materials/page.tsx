@@ -1,5 +1,8 @@
 'use client';
 
+// Study materials. Faculty and admin can upload and delete files; students only view and download.
+// Uses the /materials API.
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -23,6 +26,7 @@ export default function Materials() {
   const [open, setOpen] = useState(false);
   const confirm = useConfirm();
 
+  // A file is being sent, so the request body must be FormData instead of plain JSON.
   const upload = async (v) => {
     const fd = new FormData();
     fd.append('title', v.title);
@@ -32,20 +36,18 @@ export default function Materials() {
     fd.append('file', v.file);
     await api.post('/materials', fd);
     toast.success('Material uploaded');
-    clearOptionCache();
+    clearOptionCache(); // drop cached dropdown options so they are loaded fresh next time
     setOpen(false);
     list.reload();
   };
   const remove = async (m) => {
-    if (
-      !(await confirm({
-        title: 'Delete material?',
-        message: `"${m.title}" will be permanently removed for all students.`,
-        confirmLabel: 'Delete',
-        danger: true,
-      }))
-    )
-      return;
+    const confirmed = await confirm({
+      title: 'Delete material?',
+      message: `"${m.title}" will be permanently removed for all students.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.delete(`/materials/${m._id}`);
       toast.success('Material deleted');

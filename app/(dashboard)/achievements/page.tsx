@@ -1,5 +1,9 @@
 'use client';
 
+// Achievements. Students add achievements (with an optional certificate) and can delete their
+// unverified ones. Faculty/admin verify or reject pending ones; only admin can delete any.
+// API: /achievements
+
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -23,9 +27,14 @@ export default function Achievements() {
   const [adding, setAdding] = useState(false);
   const confirm = useConfirm();
 
+  const canDelete = (a) => user.role === 'admin' || (isStudent && a.status !== 'verified');
+
   const add = async (v) => {
+    // FormData is needed because the certificate is a file upload.
     const fd = new FormData();
-    ['title', 'category', 'description', 'date'].forEach((k) => v[k] && fd.append(k, v[k]));
+    for (const key of ['title', 'category', 'description', 'date']) {
+      if (v[key]) fd.append(key, v[key]);
+    }
     if (v.certificate) fd.append('certificate', v.certificate);
     await api.post('/achievements', fd);
     toast.success('Achievement added and sent for verification');
@@ -42,8 +51,8 @@ export default function Achievements() {
     }
   };
   const remove = async (a) => {
-    if (!(await confirm({ title: 'Delete achievement?', message: `"${a.title}" will be removed.`, confirmLabel: 'Delete', danger: true })))
-      return;
+    const ok = await confirm({ title: 'Delete achievement?', message: `"${a.title}" will be removed.`, confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
     try {
       await api.delete(`/achievements/${a._id}`);
       toast.success('Deleted');
@@ -137,9 +146,7 @@ export default function Achievements() {
                   </Button>
                 </>
               )}
-              {(user.role === 'admin' || (isStudent && a.status !== 'verified')) && (
-                <RowAction icon="trash" danger label="Delete achievement" onClick={() => remove(a)} />
-              )}
+              {canDelete(a) && <RowAction icon="trash" danger label="Delete achievement" onClick={() => remove(a)} />}
             </>
           )}
         />

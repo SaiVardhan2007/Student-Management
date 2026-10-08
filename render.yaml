@@ -1,0 +1,38 @@
+# Render blueprint — free web service built from the Dockerfile. Database: MongoDB Atlas M0 (free, no card).
+services:
+  - type: web
+    name: student-management-system
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/ready
+    envVars:
+      - key: MONGODB_URI
+        sync: false # paste your Atlas connection string
+      - key: APP_URL
+        sync: false # https://<your-service>.onrender.com
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: STORAGE
+        value: gridfs
+      - key: COOKIE_SECURE
+        value: 'true'
+      - key: TRUST_PROXY
+        value: '1'
+      - key: ADMIN_NAME
+        value: Administrator
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: '587'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false
