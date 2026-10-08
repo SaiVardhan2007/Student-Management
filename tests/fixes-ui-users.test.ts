@@ -88,6 +88,9 @@ describe('user admin', () => {
       .set(auth(fx.tokens.admin))
       .send({ children: [String(fx.students[0]._id)] });
     expect(notParent.status).toBe(400);
+    // the edit form always sends the hidden, empty list: that must not block editing an admin account
+    const formEdit = await request(app).patch(`/api/users/${adminUser}`).set(auth(fx.tokens.admin)).send({ name: 'Admin Renamed', children: [] });
+    expect(formEdit.status).toBe(200);
     const good = await request(app)
       .patch(`/api/users/${parentId}`)
       .set(auth(fx.tokens.admin))

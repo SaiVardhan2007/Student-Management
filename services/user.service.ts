@@ -62,7 +62,8 @@ export async function update(ctx: Ctx) {
 
   // linked students only make sense for parents, and they must exist (checked before anything is saved)
   if (body.children !== undefined) {
-    if (finalRole !== 'parent') throw AppError.badRequest('Linked students can only be set on parent accounts');
+    // the edit form always sends the (hidden, empty) list, so only a non-empty list is an error for other roles
+    if (finalRole !== 'parent' && body.children.length) throw AppError.badRequest('Linked students can only be set on parent accounts');
     body.children = [...new Set<string>(body.children.map(String))];
     if (body.children.length && (await Student.countDocuments({ _id: { $in: body.children } })) !== body.children.length)
       throw AppError.badRequest('One or more linked students were not found');
