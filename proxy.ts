@@ -52,5 +52,5 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // pages only: API routes authenticate themselves, and static assets must stay public
-  matcher: ['/((?!api|_next/static|_next/image|favicon.svg|manifest.webmanifest|robots.txt|.*\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.svg|manifest.webmanifest|robots.txt|sw.js|offline.html|.*\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)'],
 };

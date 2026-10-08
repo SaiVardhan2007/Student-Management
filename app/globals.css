@@ -781,6 +781,21 @@ table.table {
   flex: none;
   opacity: 0.9;
 }
+/* fixed-size slot so the spinner never shifts the layout; only its opacity changes */
+.nav-pending {
+  margin-left: auto;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0;
+  animation: spin 0.7s linear infinite;
+}
+.nav-pending.is-pending {
+  opacity: 0.8;
+}
 .main {
   display: flex;
   flex-direction: column;

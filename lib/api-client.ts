@@ -152,6 +152,7 @@ async function request(method: string, url: string, data?: unknown, config: Requ
       } catch (e: any) {
         if (e?.response?.status === 401 || e?.response?.status === 403) {
           sessionHint.clear();
+          onWrite(); // drop cached data of the expired session
           onSessionExpired();
         }
         throw e?.response ? e : error;
@@ -161,12 +162,23 @@ async function request(method: string, url: string, data?: unknown, config: Requ
   }
 }
 
+// Any write may change what a cached GET would return (and login/logout switch users), so it empties the
+// useFetch cache. Registered by hooks/index.ts to avoid an import cycle.
+let onWrite: () => void = () => {};
+export const setWriteHandler = (fn: () => void) => {
+  onWrite = fn;
+};
+const write = (method: string, url: string, data?: unknown, config?: RequestConfig) => {
+  onWrite();
+  return request(method, url, data, config).finally(() => onWrite());
+};
+
 export const api = {
   get: (url: string, config?: RequestConfig) => request('GET', url, undefined, config),
-  delete: (url: string, config?: RequestConfig) => request('DELETE', url, undefined, config),
-  post: (url: string, data?: unknown, config?: RequestConfig) => request('POST', url, data ?? {}, config),
-  put: (url: string, data?: unknown, config?: RequestConfig) => request('PUT', url, data ?? {}, config),
-  patch: (url: string, data?: unknown, config?: RequestConfig) => request('PATCH', url, data ?? {}, config),
+  delete: (url: string, config?: RequestConfig) => write('DELETE', url, undefined, config),
+  post: (url: string, data?: unknown, config?: RequestConfig) => write('POST', url, data ?? {}, config),
+  put: (url: string, data?: unknown, config?: RequestConfig) => write('PUT', url, data ?? {}, config),
+  patch: (url: string, data?: unknown, config?: RequestConfig) => write('PATCH', url, data ?? {}, config),
 };
 
 /** Turn any thrown error into a human-friendly message. */

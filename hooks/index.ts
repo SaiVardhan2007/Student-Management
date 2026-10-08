@@ -3,7 +3,7 @@
 // Small reusable React hooks: debounced values, data fetching, paginated lists, toggles and click-outside.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, errorMessage } from '@/lib/api-client';
+import { api, errorMessage, setWriteHandler } from '@/lib/api-client';
 
 /** Returns `value` only after it has stopped changing for `delay` ms (used so search boxes don't call the API on every keystroke). */
 export function useDebounce<T>(value: T, delay = 350) {
@@ -15,29 +15,57 @@ export function useDebounce<T>(value: T, delay = 350) {
   return v;
 }
 
+/**
+ * In-memory response cache (stale-while-revalidate): a page visited before shows its last data instantly while a
+ * fresh copy loads in the background. Cleared on every write (POST/PUT/PATCH/DELETE, incl. login/logout), so it
+ * never serves data across users or after a change. Lives only in this tab's memory.
+ */
+const responseCache = new Map<string, { data: any; meta: any }>();
+const MAX_CACHE = 150;
+export function clearFetchCache() {
+  responseCache.clear();
+}
+setWriteHandler(clearFetchCache);
+function remember(key: string, value: { data: any; meta: any }) {
+  responseCache.delete(key);
+  responseCache.set(key, value);
+  if (responseCache.size > MAX_CACHE) responseCache.delete(responseCache.keys().next().value!);
+}
+
 /** Fetch one endpoint. Returns { data, meta, loading, error, reload }. */
 export function useFetch(url: string | null | undefined, params?: Record<string, any>, { enabled = true }: { enabled?: boolean } = {}) {
-  const [state, setState] = useState<{ data: any; meta: any; loading: boolean; error: string | null }>({ data: null, meta: null, loading: enabled, error: null });
   const key = JSON.stringify([url, params]);
+  const [state, setState] = useState<{ data: any; meta: any; loading: boolean; error: string | null }>(() => {
+    const hit = enabled && url ? responseCache.get(key) : undefined;
+    return hit ? { ...hit, loading: false, error: null } : { data: null, meta: null, loading: enabled, error: null };
+  });
   const seq = useRef(0);
 
-  const load = useCallback(async () => {
-    if (!enabled || !url) return;
-    const id = ++seq.current;
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const res = await api.get(url, { params });
-      if (id === seq.current) setState({ data: res.data.data, meta: res.data.meta || null, loading: false, error: null });
-    } catch (err) {
-      if (id === seq.current) setState((s) => ({ ...s, loading: false, error: errorMessage(err, 'Unable to load data.') }));
-    }
+  const load = useCallback(
+    async (background = false) => {
+      if (!enabled || !url) return;
+      const id = ++seq.current;
+      const hit = responseCache.get(key);
+      if (hit && background) setState({ ...hit, loading: false, error: null });
+      else setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        const res = await api.get(url, { params });
+        const value = { data: res.data.data, meta: res.data.meta || null };
+        remember(key, value);
+        if (id === seq.current) setState({ ...value, loading: false, error: null });
+      } catch (err) {
+        if (id === seq.current) setState((s) => ({ ...s, loading: false, error: errorMessage(err, 'Unable to load data.') }));
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled]);
+    [key, enabled]
+  );
 
   useEffect(() => {
-    load();
+    load(true);
   }, [load]);
-  return { ...state, reload: load };
+  const reload = useCallback(() => load(false), [load]);
+  return { ...state, reload };
 }
 
 /** Server-side paginated list state (page, search, sort, filters). */

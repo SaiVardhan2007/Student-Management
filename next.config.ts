@@ -25,6 +25,8 @@ const nextConfig: NextConfig = {
   experimental: {
     // uploads go through route handlers; keep the same 10 MB cap as before (plus multipart overhead)
     proxyClientMaxBodySize: '12mb',
+    // reuse visited pages from the client router cache instead of asking the server again on every click
+    staleTimes: { dynamic: 60, static: 300 },
   },
   async headers() {
     return [

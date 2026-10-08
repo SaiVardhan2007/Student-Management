@@ -4,7 +4,7 @@
 // Wraps every dashboard page.
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useSettings } from '@/components/providers/settings-provider';
@@ -41,6 +41,12 @@ function Logo({ logo }: any) {
       {src ? <img src={src} alt="" /> : <Icon name="graduation" size={18} />}
     </span>
   );
+}
+
+/** Small spinner inside a sidebar link while its page is loading (shown the moment the link is clicked). */
+function LinkPending() {
+  const { pending } = useLinkStatus();
+  return <span className={`nav-pending ${pending ? 'is-pending' : ''}`} aria-hidden="true" />;
 }
 
 /** Home > Section > Page trail built from the current URL. */
@@ -276,6 +282,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   aria-current={isActive(i) ? 'page' : undefined}
                 >
                   <Icon name={i.icon} size={17} /> {i.label}
+                  <LinkPending />
                 </Link>
               ))}
             </div>
