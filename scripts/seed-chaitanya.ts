@@ -4,16 +4,22 @@
  *
  *   MONGODB_URI='<uri>' npx tsx scripts/seed-chaitanya.ts --yes
  *
+ * On a hosted database (Atlas) also pass STORAGE=gridfs, so the sample PDFs (materials, documents) are stored in MongoDB.
+ * Demo logins (password Chaitanya@2026): faculty@gmail.com, student@gmail.com, parent@gmail.com.
+ *
  * DESTRUCTIVE: deletes ALL data except admin accounts, then re-creates the sample data. All names, emails ending in
  * @example.com, phone numbers and records are fictional. Temporary passwords are written to backups/sample-credentials.csv.
  */
 import fs from 'fs';
+import crypto from 'crypto';
 import mongoose from 'mongoose';
+import PDFDocument from 'pdfkit';
 import './env';
 import { connectDB, disconnectDB } from '../lib/mongodb';
 import * as M from '../models';
 import { createAccount } from '../services/accounts';
 import { syncEnrollments } from '../services/enrollment';
+import { putFile } from '../lib/storage';
 
 const day = (offset: number) => new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + offset));
 let seedN = 7;
@@ -21,10 +27,44 @@ const rnd = () => (seedN = (seedN * 1664525 + 1013904223) % 4294967296) / 429496
 const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
 const creds: string[][] = [['role', 'name', 'email', 'id', 'temporary_password']];
 
-async function account(name: string, email: string, role: string, id = '') {
-  const { user, temporaryPassword } = await createAccount({ name, email, role });
-  creds.push([role, name, email, id, temporaryPassword || '']);
+const DEMO_PASSWORD = 'Chaitanya@2026';
+
+async function account(name: string, email: string, role: string, id = '', password?: string) {
+  const { user, temporaryPassword } = await createAccount({ name, email, role, password });
+  creds.push([role, name, email, id, password ? `${password} (demo login)` : temporaryPassword || '']);
   return user;
+}
+
+/** Overwrite the automatic createdAt/updatedAt so records look like they were made over the past weeks. */
+async function backdate(model: any, id: unknown, date: Date) {
+  await model.collection.updateOne({ _id: id }, { $set: { createdAt: date, updatedAt: date } });
+}
+
+/** A small, real PDF (lecture notes, question papers, scanned documents). */
+function makePdf(title: string, lines: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 56 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.fontSize(10).fillColor('#555555').text('Chaitanya (Deemed to be University), Hyderabad');
+    doc.moveDown();
+    doc.fontSize(18).fillColor('#000000').text(title);
+    doc.moveDown();
+    doc.fontSize(11);
+    for (const line of lines) {
+      doc.text(line);
+      doc.moveDown(0.5);
+    }
+    doc.end();
+  });
+}
+async function storePdf(category: string, title: string, lines: string[]) {
+  const filename = `${crypto.randomBytes(16).toString('hex')}.pdf`;
+  const buffer = await makePdf(title, lines);
+  await putFile(category, filename, buffer, 'application/pdf');
+  return { path: `${category}/${filename}`, originalName: `${title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_')}.pdf`, mimeType: 'application/pdf', size: buffer.length };
 }
 
 const DEPTS = [
@@ -69,6 +109,22 @@ const SUBJECTS: Record<string, [string, string, number, string, number][]> = {
   MBA: [['MB301', 'Strategic Management', 4, 'theory', 15], ['MB302', 'Financial Management', 4, 'theory', 16], ['MB303', 'Marketing Analytics', 3, 'theory', 15], ['MB304', 'Human Resource Management', 3, 'theory', 16]],
 };
 
+// earlier semesters (for results / CGPA): [name, credits, type]
+const FIRST_YEAR: [string, number, string][][] = [
+  [['Engineering Mathematics I', 4, 'theory'], ['Engineering Physics', 3, 'theory'], ['Programming for Problem Solving', 3, 'theory'], ['Basic Electrical Engineering', 3, 'theory'], ['English Communication Skills', 2, 'theory'], ['Engineering Workshop', 2, 'practical']],
+  [['Engineering Mathematics II', 4, 'theory'], ['Engineering Chemistry', 3, 'theory'], ['Data Structures', 3, 'theory'], ['Engineering Graphics', 3, 'theory'], ['Environmental Science', 2, 'theory'], ['Programming Laboratory', 2, 'practical']],
+];
+const SECOND_YEAR: Record<string, [string, number, string][][]> = {
+  CSE: [[['Discrete Mathematics', 3, 'theory'], ['Object Oriented Programming through Java', 3, 'theory'], ['Digital Logic Design', 3, 'theory'], ['Computer Organization and Architecture', 3, 'theory'], ['Java Programming Laboratory', 2, 'practical']], [['Probability and Statistics', 3, 'theory'], ['Software Engineering', 3, 'theory'], ['Python Programming', 3, 'theory'], ['Web Technologies', 3, 'theory'], ['Python Programming Laboratory', 2, 'practical']]],
+  AIML: [[['Discrete Mathematics', 3, 'theory'], ['Object Oriented Programming through Java', 3, 'theory'], ['Digital Logic Design', 3, 'theory'], ['Introduction to Artificial Intelligence', 3, 'theory'], ['Java Programming Laboratory', 2, 'practical']], [['Probability and Statistics', 3, 'theory'], ['Database Management Systems', 3, 'theory'], ['Python for Data Science', 3, 'theory'], ['Operating Systems', 3, 'theory'], ['Data Science Laboratory', 2, 'practical']]],
+  ECE: [[['Electronic Devices and Circuits', 3, 'theory'], ['Signals and Systems', 3, 'theory'], ['Network Analysis', 3, 'theory'], ['Probability Theory and Stochastic Processes', 3, 'theory'], ['Electronic Devices Laboratory', 2, 'practical']], [['Analog Circuits', 3, 'theory'], ['Electromagnetic Waves and Transmission Lines', 3, 'theory'], ['Analog Communications', 3, 'theory'], ['Linear IC Applications', 3, 'theory'], ['Analog Circuits Laboratory', 2, 'practical']]],
+  EEE: [[['Electrical Circuit Analysis', 3, 'theory'], ['Electromagnetic Fields', 3, 'theory'], ['Electronic Devices and Circuits', 3, 'theory'], ['Electrical Machines I', 3, 'theory'], ['Electrical Circuits Laboratory', 2, 'practical']], [['Power Generation and Distribution', 3, 'theory'], ['Measurements and Instrumentation', 3, 'theory'], ['Digital Electronics', 3, 'theory'], ['Signals and Systems', 3, 'theory'], ['Electrical Machines I Laboratory', 2, 'practical']]],
+  MECH: [[['Engineering Mechanics', 3, 'theory'], ['Thermodynamics', 3, 'theory'], ['Material Science and Metallurgy', 3, 'theory'], ['Mechanics of Solids', 3, 'theory'], ['Metallurgy Laboratory', 2, 'practical']], [['Fluid Mechanics and Hydraulic Machines', 3, 'theory'], ['Kinematics of Machinery', 3, 'theory'], ['Production Technology', 3, 'theory'], ['Applied Thermodynamics', 3, 'theory'], ['Fluid Mechanics Laboratory', 2, 'practical']]],
+  CIVIL: [[['Strength of Materials I', 3, 'theory'], ['Surveying', 3, 'theory'], ['Fluid Mechanics', 3, 'theory'], ['Building Materials and Construction', 3, 'theory'], ['Surveying Laboratory', 2, 'practical']], [['Strength of Materials II', 3, 'theory'], ['Hydraulics and Hydraulic Machinery', 3, 'theory'], ['Concrete Technology', 3, 'theory'], ['Engineering Geology', 3, 'theory'], ['Strength of Materials Laboratory', 2, 'practical']]],
+  MBA: [[['Management and Organisational Behaviour', 4, 'theory'], ['Managerial Economics', 3, 'theory'], ['Accounting for Managers', 4, 'theory'], ['Business Statistics', 3, 'theory'], ['Business Communication', 2, 'theory']], [['Marketing Management', 4, 'theory'], ['Operations Management', 3, 'theory'], ['Business Research Methods', 3, 'theory'], ['Legal Environment of Business', 3, 'theory'], ['Corporate Finance', 4, 'theory']]],
+};
+const CODE_PREFIX: Record<string, string> = { CSE: 'CS', AIML: 'AI', ECE: 'EC', EEE: 'EE', MECH: 'ME', CIVIL: 'CE', MBA: 'MB' };
+
 const MALE = ['Aditya', 'Rohith', 'Karthik', 'Pranav', 'Sandeep', 'Varun', 'Manoj', 'Akhil', 'Teja', 'Charan', 'Srikanth', 'Naveen', 'Vamsi', 'Abhishek', 'Harish', 'Sathwik', 'Rakesh', 'Dinesh', 'Mahesh', 'Bharath', 'Lokesh', 'Yashwanth', 'Hemanth', 'Ganesh', 'Santosh', 'Uday', 'Pavan', 'Sriram', 'Nikhil', 'Rahul'];
 const FEMALE = ['Ananya', 'Sravani', 'Keerthi', 'Divya', 'Bhavana', 'Harini', 'Mounika', 'Pravallika', 'Nikitha', 'Sahithi', 'Meghana', 'Spandana', 'Tejaswini', 'Anusha', 'Lasya', 'Sowmya', 'Pooja', 'Navya', 'Deekshitha', 'Rishitha', 'Jyothi', 'Gayathri', 'Srija', 'Manasa', 'Charitha', 'Ramya', 'Supriya', 'Swetha', 'Aishwarya', 'Bindu'];
 const LAST = ['Reddy', 'Naidu', 'Goud', 'Rao', 'Varma', 'Chary', 'Yadav', 'Sharma', 'Kumar', 'Prasad', 'Raju', 'Setty', 'Patel', 'Gupta', 'Mudiraj', 'Bhaskar', 'Nair', 'Joshi'];
@@ -93,6 +149,9 @@ const TEAM: Record<string, [string, string]> = {
 
 async function main() {
   if (!process.argv.includes('--yes')) throw new Error('This deletes all non-admin data. Re-run with --yes to continue.');
+  if (/mongodb\.net/.test(process.env.MONGODB_URI || '') && process.env.STORAGE !== 'gridfs') {
+    throw new Error('Hosted database detected: also set STORAGE=gridfs so the sample files are stored in MongoDB.');
+  }
   await connectDB();
   console.log('Connected to', mongoose.connection.host, '/', mongoose.connection.name);
 
@@ -129,8 +188,9 @@ async function main() {
   // ---- faculty
   const faculty: any[] = [];
   for (const [employeeId, firstName, lastName, d, designation] of FACULTY) {
-    const email = `${firstName}.${lastName}`.toLowerCase() + '@example.com';
-    const user = await account(`${firstName} ${lastName}`, email, 'faculty', employeeId);
+    const demo = employeeId === 'CDU-F001';
+    const email = demo ? 'faculty@gmail.com' : `${firstName}.${lastName}`.toLowerCase() + '@example.com';
+    const user = await account(`${firstName} ${lastName}`, email, 'faculty', employeeId, demo ? DEMO_PASSWORD : undefined);
     faculty.push(await M.Faculty.create({ user: user._id, employeeId, firstName, lastName, email, phone: `9${String(Math.floor(100000000 + rnd() * 899999999))}`, department: dept[d]._id, designation, joiningDate: new Date(`20${10 + Math.floor(rnd() * 12)}-0${1 + Math.floor(rnd() * 9)}-01`) }));
   }
   for (const d of DEPTS) {
@@ -174,9 +234,10 @@ async function main() {
         gender = female ? 'female' : 'male';
       }
       nameKeys.add(firstName + lastName);
-      const email = `${studentId.toLowerCase()}@example.com`;
+      const demo = studentId === '24CSE4001';
+      const email = demo ? 'student@gmail.com' : `${studentId.toLowerCase()}@example.com`;
       // team members get no login: they sign up themselves (Register page) with their admission number and this email
-      const user = team ? null : await account(`${firstName} ${lastName}`.trim(), email, 'student', studentId);
+      const user = team ? null : await account(`${firstName} ${lastName}`.trim(), email, 'student', studentId, demo ? DEMO_PASSWORD : undefined);
       const [area, pincode] = pick(AREAS);
       const guardianName = `${pick(g.d === 'MBA' ? MALE : MALE)} ${lastName || pick(LAST)}`;
       const s = await M.Student.create({
@@ -184,7 +245,7 @@ async function main() {
         phone: `${pick(['98', '99', '90', '91', '70', '63'])}${String(10000000 + Math.floor(rnd() * 89999999))}`,
         gender, dateOfBirth: new Date(Date.UTC(g.d === 'MBA' ? 2002 : 2006, Math.floor(rnd() * 12), 1 + Math.floor(rnd() * 27))),
         address: { line1: `H.No ${1 + Math.floor(rnd() * 90)}-${1 + Math.floor(rnd() * 99)}, ${area}`, city: ['Warangal', 'Karimnagar', 'Khammam', 'Nizamabad', 'Vijayawada', 'Guntur'].includes(area) ? area : 'Hyderabad', state: ['Vijayawada', 'Guntur'].includes(area) ? 'Andhra Pradesh' : 'Telangana', pincode, country: 'India' },
-        guardian: { name: guardianName, relation: 'Father', phone: `98${String(10000000 + Math.floor(rnd() * 89999999))}`, email: `parent.${studentId.toLowerCase()}@example.com` },
+        guardian: { name: guardianName, relation: 'Father', phone: `98${String(10000000 + Math.floor(rnd() * 89999999))}`, email: demo ? 'parent@gmail.com' : `parent.${studentId.toLowerCase()}@example.com` },
         emergencyContact: { name: guardianName, phone: `98${String(10000000 + Math.floor(rnd() * 89999999))}`, relation: 'Father' },
         department: dept[g.d]._id, program: prog[g.d]._id, batch: g.batch, academicYear: year._id, semester: g.sem,
         section: sections[`${g.d}-${g.sec}`]._id, admissionYear: Number(g.batch.slice(0, 4)), admissionDate: new Date(`${g.batch.slice(0, 4)}-07-${10 + Math.floor(rnd() * 10)}`), status: 'active',
@@ -195,10 +256,37 @@ async function main() {
   }
   const parentOf = students.filter((s, i) => i % 7 === 0 && !TEAM[s.studentId]).slice(0, 8);
   for (const s of parentOf) {
-    const u = await account(s.guardian.name, s.guardian.email, 'parent', `parent of ${s.studentId}`);
+    const u = await account(s.guardian.name, s.guardian.email, 'parent', `parent of ${s.studentId}`, s.guardian.email === 'parent@gmail.com' ? DEMO_PASSWORD : undefined);
     u.children = [s._id];
     await u.save();
   }
+
+  // ---- earlier semesters: subjects, completed enrollments and final marks (feeds Results, SGPA/CGPA and placements)
+  const ability = new Map<string, number>();
+  for (const s of students) ability.set(String(s._id), 0.45 + rnd() * 0.5);
+  const pastEnrollments: any[] = [], pastMarks: any[] = [];
+  for (const g of GROUPS.filter((x) => x.sec === 'A')) {
+    const curricula = g.d === 'MBA' ? SECOND_YEAR.MBA : [...FIRST_YEAR, ...SECOND_YEAR[g.d]];
+    const deptFaculty = faculty.filter((f) => String(f.department) === String(dept[g.d]._id));
+    const groupStudents = students.filter((s) => String(s.program) === String(prog[g.d]._id));
+    for (let sem = 1; sem < g.sem; sem++) {
+      const list = curricula[sem - 1];
+      for (let i = 0; i < list.length; i++) {
+        const [name, credits, type] = list[i];
+        const sub = await M.Subject.create({ code: `${CODE_PREFIX[g.d]}${sem}0${i + 1}`, name, credits, type, department: dept[g.d]._id, program: prog[g.d]._id, semester: sem, faculty: deptFaculty[i % deptFaculty.length]._id });
+        const fac = deptFaculty[i % deptFaculty.length];
+        for (const st of groupStudents) {
+          pastEnrollments.push({ student: st._id, subject: sub._id, semester: sem, status: 'completed' });
+          const a = Math.min(0.98, Math.max(0.3, ability.get(String(st._id))! + (rnd() - 0.5) * 0.2));
+          const internalMax = type === 'practical' ? 40 : 30, finalMax = type === 'practical' ? 60 : 70;
+          pastMarks.push({ student: st._id, subject: sub._id, semester: sem, examType: 'internal', maxMarks: internalMax, marksObtained: Math.round(internalMax * Math.min(1, a + 0.08)), enteredBy: fac.user });
+          pastMarks.push({ student: st._id, subject: sub._id, semester: sem, examType: type === 'practical' ? 'practical' : 'final', maxMarks: finalMax, marksObtained: Math.round(finalMax * a), enteredBy: fac.user });
+        }
+      }
+    }
+  }
+  await M.Enrollment.insertMany(pastEnrollments);
+  await M.Mark.insertMany(pastMarks);
 
   // ---- timetable (greedy, no clashes)
   const PERIODS = [['09:00', '10:00'], ['10:00', '11:00'], ['11:15', '12:15'], ['12:15', '13:15'], ['14:00', '15:00'], ['15:00', '16:00']];
@@ -232,17 +320,24 @@ async function main() {
   await M.Timetable.insertMany(timetable);
 
   // ---- attendance (last 20 weekdays) and marks
-  const enrollments: any[] = await M.Enrollment.find().lean();
+  const enrollments: any[] = await M.Enrollment.find({ status: 'enrolled' }).lean();
   const studentById = new Map(students.map((s) => [String(s._id), s]));
-  const days: Date[] = [];
-  for (let d = -1; days.length < 20; d--) if (![0, 6].includes(day(d).getUTCDay())) days.push(day(d));
+  // class days since the semester started (Independence Day and Vinayaka Chavithi are holidays)
+  const HOLIDAYS = new Set(['2026-08-15', '2026-09-14']);
+  const datesByDay: Record<string, Date[]> = {};
+  for (let d = new Date('2026-07-01T00:00:00Z'); d < day(0); d = new Date(d.getTime() + 86400000)) {
+    if (HOLIDAYS.has(d.toISOString().slice(0, 10))) continue;
+    (datesByDay[['sunday', ...DAYS][d.getUTCDay()]] ||= []).push(new Date(d));
+  }
   const attendance: any[] = [], marks: any[] = [];
-  const quality = new Map<string, number>(), ability = new Map<string, number>();
-  for (const s of students) { quality.set(String(s._id), 0.62 + rnd() * 0.38); ability.set(String(s._id), 0.45 + rnd() * 0.5); }
+  const quality = new Map<string, number>();
+  for (const s of students) quality.set(String(s._id), 0.62 + rnd() * 0.38);
   for (const e of enrollments) {
     const stu = studentById.get(String(e.student))!, sub = subjects.find((s) => String(s._id) === String(e.subject));
     const fac = faculty.find((f) => String(f._id) === String(sub.faculty));
     const q = quality.get(String(stu._id))!, a = ability.get(String(stu._id))!;
+    const classDays = [...new Set(timetable.filter((t) => String(t.subject) === String(sub._id) && String(t.section) === String(stu.section)).map((t) => t.day))];
+    const days = classDays.flatMap((d) => datesByDay[d] || []);
     for (const dt of days) {
       const r = rnd();
       attendance.push({ subject: sub._id, section: stu.section, student: stu._id, date: dt, status: r < q ? 'present' : r < q + 0.04 ? 'late' : r < q + 0.07 ? 'excused' : 'absent', markedBy: fac.user });
@@ -317,6 +412,10 @@ async function main() {
     const lab = subjectsOf(g.d).find((s) => s.type === 'practical');
     if (lab) exams.push({ name: `Practical Examination - ${lab.name}`, type: 'practical', subject: lab._id, program: prog[g.d]._id, semester: g.sem, date: day(45), startTime: '09:30', endTime: '12:30', room: `LAB-${g.d.slice(0, 3)}`, invigilators: [faculty[FACULTY.findIndex((f) => f[3] === g.d)]._id], maxMarks: 50, isPublished: true });
   }
+  for (const ex of exams.filter((x) => x.type === 'mid')) {
+    const takers = students.filter((st) => String(st.program) === String(ex.program)).sort((a, b) => a.studentId.localeCompare(b.studentId));
+    ex.seating = takers.map((st, i) => ({ student: st._id, seat: `${ex.room.replace('Exam Hall ', 'H')}-${String(i + 1).padStart(2, '0')}` }));
+  }
   await M.Exam.insertMany(exams);
 
   // ---- notices and calendar
@@ -350,7 +449,7 @@ async function main() {
   const FEE_TYPES: [string, number, number][] = [['Semester 5 Tuition Fee', 85000, 12], ['Examination Fee', 3500, 20], ['Library and Laboratory Fee', 6000, 12]];
   const methods = ['upi', 'netbanking', 'card', 'cash'];
   let receipt = 1000;
-  for (const g of GROUPS) {
+  for (const g of GROUPS.filter((x) => x.sec === 'A')) { // one set of fee structures per programme (CSE has two sections)
     const gs = students.filter((s) => String(s.program) === String(prog[g.d]._id));
     for (const [name, amount0, due] of FEE_TYPES) {
       const amount = g.d === 'MBA' ? Math.round(amount0 * 1.25) : amount0;
@@ -361,6 +460,17 @@ async function main() {
         return { student: s._id, structure: fs._id, title: fs.name, amountDue: amount, amountPaid: paid, dueDate: day(due), payments: paid ? [{ amount: paid, method: pick(methods), receiptNo: `RCT-2026-${receipt++}`, paidAt: day(-1 - Math.floor(rnd() * 12)), recordedBy: admin._id }] : [] };
       }));
     }
+  }
+
+  // previous semester's tuition: most paid on time, a few still partly pending
+  for (const g of GROUPS.filter((x) => x.sec === 'A')) {
+    const gs = students.filter((s) => String(s.program) === String(prog[g.d]._id));
+    const amount = g.d === 'MBA' ? 106250 : 85000;
+    const fs = await M.FeeStructure.create({ name: `Semester ${g.sem - 1} Tuition Fee`, program: prog[g.d]._id, semester: g.sem - 1, amount, dueDate: new Date('2026-01-31') });
+    await M.Fee.insertMany(gs.map((s) => {
+      const paid = rnd() < 0.92 ? amount : Math.round(amount * 0.6);
+      return { student: s._id, structure: fs._id, title: fs.name, amountDue: amount, amountPaid: paid, dueDate: fs.dueDate, payments: [{ amount: paid, method: pick(methods), receiptNo: `RCT-2026-${receipt++}`, paidAt: new Date(Date.UTC(2026, 0, 5 + Math.floor(rnd() * 25))), recordedBy: admin._id }] };
+    }));
   }
 
   // ---- placements
@@ -470,9 +580,81 @@ async function main() {
   for (const s of students.filter((x) => x.user)) {
     notifications.push({ user: s.user, title: 'Mid Semester 1 schedule published', message: 'Check the Examinations page for dates and halls.', type: 'exam', link: '/exams', isRead: rnd() < 0.4 });
     notifications.push({ user: s.user, title: 'Fee payment reminder', message: 'Pay your pending semester fees before the due date.', type: 'fee', link: '/fees', isRead: rnd() < 0.3 });
+    notifications.push({ user: s.user, title: 'Internal marks published', message: 'Quiz and internal marks for this semester are now available.', type: 'marks', link: '/marks', isRead: rnd() < 0.6 });
+    notifications.push({ user: s.user, title: 'New placement drive', message: 'Registrations are open for upcoming campus drives.', type: 'placement', link: '/placements', isRead: rnd() < 0.5 });
   }
   for (const f of faculty) notifications.push({ user: f.user, title: 'Academic council meeting', message: 'Meeting at 4:00 PM in the Seminar Hall.', type: 'notice', link: '/notices', isRead: rnd() < 0.5 });
   await M.Notification.insertMany(notifications);
+
+
+  // ---- study materials (real PDFs) uploaded by the subject's faculty
+  for (const sub of subjects) {
+    const fac = faculty.find((f) => String(f._id) === String(sub.faculty));
+    const items: [string, string, string[]][] = [
+      [`${sub.code} ${sub.name} - Unit 1 Lecture Notes`, 'notes', [`Subject: ${sub.code} ${sub.name}`, `Faculty: ${fac.firstName} ${fac.lastName}`, 'Unit 1: Introduction and fundamentals', '1. Course objectives and outcomes', '2. Basic terminology and definitions', '3. Worked examples discussed in class', '4. Practice problems for self-study', 'Reference: prescribed textbook, chapters 1-3.']],
+      [`${sub.code} ${sub.name} - Mid 1 Question Paper (2025)`, 'question_paper', [`${sub.name} - Mid Semester 1 Examination, 2025`, 'Time: 90 minutes      Max. marks: 30', 'Answer any FIVE questions. All questions carry equal marks.', ...Array.from({ length: 6 }, (_, i) => `Q${i + 1}. Explain the concept covered in topic ${i + 1} with a suitable example.`)]],
+    ];
+    if (sub.type !== 'practical') items.push([`${sub.code} ${sub.name} - Unit 2 Slides`, 'pdf', [`Subject: ${sub.code} ${sub.name}`, 'Unit 2 presentation slides used in class.', 'Key ideas, diagrams and summary points for revision.']]);
+    for (const [title, type, lines] of items) {
+      const m = await M.Material.create({ title, description: type === 'question_paper' ? 'For practice before the mid examinations.' : 'Shared after the lecture.', subject: sub._id, type, file: await storePdf('materials', title, lines), uploadedBy: fac.user });
+      await backdate(M.Material, m._id, day(-(5 + Math.floor(rnd() * 60))));
+    }
+  }
+
+  // ---- student documents (not for the team members)
+  const DOC_TYPES: [string, string][] = [['marksheet', 'SSC Marks Memo'], ['marksheet', 'Intermediate Marks Memo'], ['certificate', 'Transfer Certificate'], ['id_proof', 'College ID Card'], ['internship', 'Internship Completion Certificate']];
+  for (const st of borrowers.slice(0, 40)) {
+    for (const [type, title] of DOC_TYPES.slice(0, 2 + Math.floor(rnd() * 3))) {
+      const r = rnd();
+      const status = r < 0.6 ? 'verified' : r < 0.85 ? 'pending' : r < 0.95 ? 'reupload_requested' : 'rejected';
+      const d = await M.StudentDocument.create({
+        student: st._id, type, title, status,
+        file: await storePdf('documents', `${title} - ${st.studentId}`, [`${title}`, `Name: ${st.firstName} ${st.lastName}`, `Admission number: ${st.studentId}`, 'Scanned copy uploaded by the student.']),
+        ...(status !== 'pending' ? { reviewedBy: admin._id, reviewedAt: day(-2), reviewNote: status === 'verified' ? 'Verified with the original.' : status === 'reupload_requested' ? 'The scan is not clear. Please upload a clearer copy.' : 'This document does not belong to the student.' } : {}),
+      });
+      await backdate(M.StudentDocument, d._id, day(-(3 + Math.floor(rnd() * 40))));
+    }
+  }
+
+  // ---- attendance correction requests
+  const reasons = ['I was present but marked absent by mistake.', 'I was at the hospital (medical certificate submitted to the department).', 'I was representing the university at an inter-college sports event.', 'I attended the class but came in late because of a bus delay.'];
+  const absences = await M.Attendance.find({ status: 'absent', student: { $in: borrowers.map((b) => b._id) } }).limit(10).lean<any[]>();
+  for (const [i, a] of absences.entries()) {
+    const status = i < 4 ? 'pending' : i < 8 ? 'approved' : 'rejected';
+    await M.AttendanceCorrection.create({ attendance: a._id, student: a.student, subject: a.subject, requestedStatus: i % 3 === 1 ? 'excused' : 'present', reason: reasons[i % reasons.length], status, ...(status !== 'pending' ? { reviewedBy: a.markedBy, reviewedAt: day(-1), reviewNote: status === 'approved' ? 'Verified, updated.' : 'Not supported by the class register.' } : {}) });
+    if (status === 'approved') await M.Attendance.updateOne({ _id: a._id }, { status: i % 3 === 1 ? 'excused' : 'present', modifiedBy: a.markedBy, modifiedAt: day(-1) });
+  }
+
+  // ---- a faculty sign-up waiting for approval
+  await M.User.create({ name: 'Pradeep Kumar', email: 'pradeep.kumar@example.com', password: crypto.randomBytes(12).toString('hex') + 'Aa1', role: 'faculty', isActive: false, approvalStatus: 'pending' });
+
+  // ---- recent activity: last logins and the audit log
+  const loginUsers: any[] = await M.User.find({ isActive: true }).lean();
+  const ipOf = () => `${pick(['49.205', '106.195', '183.82', '117.213', '157.47'])}.${Math.floor(rnd() * 250)}.${Math.floor(rnd() * 250)}`;
+  for (const u of loginUsers) {
+    if (u.role === 'student' && rnd() < 0.15) continue; // a few students have not signed in yet
+    await M.User.updateOne({ _id: u._id }, { lastLoginAt: new Date(Date.now() - rnd() * 4 * 86400000) });
+  }
+  const facultyUsers = loginUsers.filter((u) => u.role === 'faculty'), studentUsers = loginUsers.filter((u) => u.role === 'student');
+  const ACTIONS: [string, string, any[]][] = [
+    ['LOGIN', 'User', loginUsers], ['LOGIN', 'User', studentUsers], ['LOGIN', 'User', facultyUsers],
+    ['ASSIGNMENT_SUBMITTED', 'Submission', studentUsers], ['DOCUMENT_UPLOADED', 'StudentDocument', studentUsers], ['JOB_APPLIED', 'Application', studentUsers],
+    ['ASSIGNMENT_CREATED', 'Assignment', facultyUsers], ['SUBMISSION_EVALUATED', 'Submission', facultyUsers], ['MATERIAL_UPLOADED', 'Material', facultyUsers],
+    ['FEE_PAYMENT', 'Fee', [admin]], ['NOTICE_CREATED', 'Notice', [admin]], ['BOOK_ISSUED', 'BookIssue', [admin]], ['BOOK_RETURNED', 'BookIssue', [admin]], ['COMPLAINT_UPDATED', 'Complaint', [admin]],
+  ];
+  const logs: any[] = [];
+  for (let i = 0; i < 220; i++) {
+    const [action, entity, who] = pick(ACTIONS);
+    const u = pick(who);
+    logs.push({ user: u._id, userName: u.name, role: u.role, action, entity, entityId: String(new mongoose.Types.ObjectId()), ip: ipOf(), timestamp: new Date(Date.now() - rnd() * 10 * 86400000) });
+  }
+  await M.AuditLog.insertMany(logs);
+
+  // ---- make records look like they were created over the past weeks
+  for (const n of await M.Notice.find().lean<any[]>()) await backdate(M.Notice, n._id, n.publishDate);
+  for (const a of assignments) await backdate(M.Assignment, a._id, new Date(a.deadline.getTime() - 10 * 86400000));
+  for (const c of await M.Complaint.find().lean<any[]>()) await backdate(M.Complaint, c._id, day(-(2 + Math.floor(rnd() * 20))));
+  for (const a of await M.Achievement.find().lean<any[]>()) await backdate(M.Achievement, a._id, a.date || day(-10));
 
   fs.mkdirSync('backups', { recursive: true });
   fs.writeFileSync('backups/sample-credentials.csv', creds.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n'));
