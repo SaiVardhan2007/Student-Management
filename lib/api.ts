@@ -13,6 +13,7 @@ import { findUnsafeKey } from './security';
 import { parseMultipart, removeUploadedFiles, type UploadSpec } from './upload';
 import { formatZodError } from '@/validators/common';
 import { ApiResult } from './response';
+import { withTiming } from './request-timing';
 import type { Ctx, Role } from './context';
 
 export { ok, created, ApiResult } from './response';
@@ -138,8 +139,31 @@ export function errorResponse(err: any, requestId: string, label = ''): NextResp
  */
 export function route(opts: RouteOptions, handler: Handler) {
   return async function routeHandler(request: Request, rc?: { params?: Promise<any> }): Promise<Response> {
-    const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
+    const started = performance.now();
     const label = `${request.method} ${new URL(request.url).pathname}`;
+    // phase durations (ms) for the Server-Timing header; database time is collected by the Mongoose timing plugin
+    const phases = { connect: 0, auth: 0 };
+    const { result: res, timing } = await withTiming(() => handle(request, rc, label, phases));
+    const total = performance.now() - started;
+    const metrics = [
+      `connect;dur=${phases.connect.toFixed(1)};desc="DB connect"`,
+      `auth;dur=${phases.auth.toFixed(1)};desc="Login check"`,
+      `db;dur=${timing.dbMs.toFixed(1)};desc="${timing.queries} DB queries"`,
+      `total;dur=${total.toFixed(1)}`,
+    ];
+    res.headers.set('Server-Timing', metrics.join(', '));
+    if (total > 1000 && !env.isTest)
+      logger.warn(`Slow request ${label} -> ${res.status}: ${metrics.join(', ')}`);
+    return res;
+  };
+
+  async function handle(
+    request: Request,
+    rc: { params?: Promise<any> } | undefined,
+    label: string,
+    phases: { connect: number; auth: number }
+  ): Promise<Response> {
+    const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
     let uploaded: any[] = [];
     try {
       const ip = clientIp(request);
@@ -149,7 +173,9 @@ export function route(opts: RouteOptions, handler: Handler) {
         if (opts.authLimiter && rateLimit(`auth:${ip}`, env.authRateLimit).limited)
           throw new AppError('Too many attempts. Please try again in 15 minutes.', 429);
       }
+      let t0 = performance.now();
       await connectDB();
+      phases.connect = performance.now() - t0;
 
       const params = (rc?.params ? await rc.params : {}) as Record<string, string>;
       const ctx: Ctx = { request, user: undefined, params, query: queryObject(request), body: {}, files: [], ip, requestId };
@@ -161,7 +187,9 @@ export function route(opts: RouteOptions, handler: Handler) {
         if (origin && host && request.method !== 'GET' && !request.headers.get('authorization')) {
           if (new URL(origin).host !== host) throw AppError.forbidden('Cross-site request blocked');
         }
+        t0 = performance.now();
         ctx.user = await authenticate(request);
+        phases.auth = performance.now() - t0;
         if (opts.roles && !opts.roles.includes(ctx.user.role)) throw AppError.forbidden();
       }
 
@@ -195,7 +223,7 @@ export function route(opts: RouteOptions, handler: Handler) {
       if (uploaded.length) await removeUploadedFiles(uploaded);
       return errorResponse(err, requestId, label);
     }
-  };
+  }
 }
 
 /** Routes the framework cannot match get the standard 404 envelope. */

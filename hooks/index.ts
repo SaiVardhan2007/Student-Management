@@ -16,27 +16,128 @@ export function useDebounce<T>(value: T, delay = 350) {
 }
 
 /**
- * In-memory response cache (stale-while-revalidate): a page visited before shows its last data instantly while a
- * fresh copy loads in the background. Cleared on every write (POST/PUT/PATCH/DELETE, incl. login/logout), so it
- * never serves data across users or after a change. Lives only in this tab's memory.
+ * Response cache (stale-while-revalidate): a page visited before shows its last data instantly while a fresh copy
+ * loads in the background. It is kept in sessionStorage too, so it survives reloads for as long as the tab is open.
+ * Cleared on every write (POST/PUT/PATCH/DELETE, incl. login/logout) and whenever the signed-in user changes, so it
+ * never serves data across users or after a change.
  */
+const STORE_KEY = 'sms.cache';
 const responseCache = new Map<string, { data: any; meta: any }>();
 const MAX_CACHE = 150;
-export function clearFetchCache() {
-  responseCache.clear();
+// GETs in progress, shared so components asking for the same data at once make a single request
+const inflight = new Map<string, Promise<{ data: any; meta: any }>>();
+// bumped by every clear, so a response that was requested before a write is not cached after it
+let generation = 0;
+// id of the user the cached data belongs to
+let owner: string | null = null;
+// false until the first client render: until then the page must match the server HTML, which had no cache
+let hydrated = false;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+if (typeof window !== 'undefined') {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null');
+    if (stored) {
+      owner = stored.owner;
+      for (const [k, v] of stored.entries) responseCache.set(k, v);
+    }
+  } catch {
+    /* storage unavailable or corrupt: start empty */
+  }
 }
-setWriteHandler(clearFetchCache);
+
+function persist() {
+  if (typeof window === 'undefined' || saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      sessionStorage.setItem(STORE_KEY, JSON.stringify({ owner, entries: [...responseCache] }));
+    } catch {
+      // over the storage quota (or unavailable): keep the in-memory cache only
+      try {
+        sessionStorage.removeItem(STORE_KEY);
+      } catch {
+        /* storage unavailable */
+      }
+    }
+  }, 300);
+}
+
+export function clearFetchCache() {
+  generation++;
+  responseCache.clear();
+  inflight.clear();
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  try {
+    sessionStorage.removeItem(STORE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+// First path segment of an API URL ('/attendance/roster?x' -> 'attendance').
+const areaOf = (url: string) => url.replace(/^\/+/, '').split(/[/?]/)[0];
+// Data that summarises other areas, dropped after every write.
+const ALWAYS_STALE = ['dashboard', 'reports', 'notifications'];
+
+/**
+ * After a write to `url`: drop the cached data of the same area (and the summaries above) so those pages load fresh.
+ * Other pages keep their copy, which they still show instantly and refresh in the background. Sign-in/out (and any
+ * write without a URL) drops everything.
+ */
+function invalidate(url?: string) {
+  const area = url && areaOf(url);
+  if (!area || area === 'auth') return clearFetchCache();
+  generation++;
+  inflight.clear();
+  const stale = new Set([area, ...ALWAYS_STALE]);
+  for (const key of [...responseCache.keys()]) {
+    if (stale.has(areaOf(JSON.parse(key)[0] || ''))) responseCache.delete(key);
+  }
+  persist();
+}
+setWriteHandler(invalidate);
+
+/** Ties the cache to the signed-in user: data cached for anyone else (or for nobody) is dropped. */
+export function setCacheOwner(userId: string | null) {
+  if (owner === userId) return;
+  clearFetchCache();
+  owner = userId;
+}
+
 function remember(key: string, value: { data: any; meta: any }) {
   responseCache.delete(key);
   responseCache.set(key, value);
   if (responseCache.size > MAX_CACHE) responseCache.delete(responseCache.keys().next().value!);
+  persist();
+}
+
+/** GET through the cache: joins a request already in flight for the same key instead of starting another. */
+function fetchShared(key: string, url: string, params?: Record<string, any>) {
+  let pending = inflight.get(key);
+  if (!pending) {
+    const gen = generation;
+    pending = api
+      .get(url, { params })
+      .then((res) => {
+        const value = { data: res.data.data, meta: res.data.meta || null };
+        if (gen === generation) remember(key, value);
+        return value;
+      })
+      .finally(() => {
+        if (inflight.get(key) === pending) inflight.delete(key);
+      });
+    inflight.set(key, pending);
+  }
+  return pending;
 }
 
 /** Fetch one endpoint. Returns { data, meta, loading, error, reload }. */
 export function useFetch(url: string | null | undefined, params?: Record<string, any>, { enabled = true }: { enabled?: boolean } = {}) {
   const key = JSON.stringify([url, params]);
   const [state, setState] = useState<{ data: any; meta: any; loading: boolean; error: string | null }>(() => {
-    const hit = enabled && url ? responseCache.get(key) : undefined;
+    const hit = hydrated && enabled && url ? responseCache.get(key) : undefined;
     return hit ? { ...hit, loading: false, error: null } : { data: null, meta: null, loading: enabled, error: null };
   });
   const seq = useRef(0);
@@ -49,9 +150,9 @@ export function useFetch(url: string | null | undefined, params?: Record<string,
       if (hit && background) setState({ ...hit, loading: false, error: null });
       else setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const res = await api.get(url, { params });
-        const value = { data: res.data.data, meta: res.data.meta || null };
-        remember(key, value);
+        // a manual reload always asks the server again
+        if (!background) inflight.delete(key);
+        const value = await fetchShared(key, url, params);
         if (id === seq.current) setState({ ...value, loading: false, error: null });
       } catch (err) {
         if (id === seq.current) setState((s) => ({ ...s, loading: false, error: errorMessage(err, 'Unable to load data.') }));
@@ -62,6 +163,7 @@ export function useFetch(url: string | null | undefined, params?: Record<string,
   );
 
   useEffect(() => {
+    hydrated = true;
     load(true);
   }, [load]);
   const reload = useCallback(() => load(false), [load]);

@@ -85,17 +85,21 @@ describe('student management', () => {
       request(app)
         .post('/api/auth/register')
         .send({ accountType: 'student', admissionNumber: 's900', email: 'new.student@t.local', password: PASSWORD, ...over });
-    // unknown admission number / email that is not the one on record
+    // unknown admission number; an email that belongs to another student
     expect((await reg({ admissionNumber: 'NOPE1' })).status).toBe(400);
-    expect((await reg({ email: 'someone.else@t.local' })).status).toBe(400);
-    const ok = await reg();
-    expect(ok.status).toBe(201);
-    const user = await User.findOne({ email: 'new.student@t.local' });
-    expect(user.role).toBe('student');
-    expect(String((await Student.findOne({ studentId: 'S900' })).user)).toBe(String(user._id));
-    // one account per admission number and per email
-    expect((await reg()).status).toBe(409);
     expect((await reg({ email: 'stu1@t.local' })).status).toBe(409);
+    // the student may sign up with an email of their own choice: it becomes the record's email too
+    const ok = await reg({ email: 'my.own@t.local' });
+    expect(ok.status).toBe(201);
+    const user = await User.findOne({ email: 'my.own@t.local' });
+    expect(user.role).toBe('student');
+    const rec = await Student.findOne({ studentId: 'S900' });
+    expect(String(rec.user)).toBe(String(user._id));
+    expect(rec.email).toBe('my.own@t.local');
+    // one account per admission number
+    expect((await reg()).status).toBe(409);
+    // the remaining tests use the original email
+    await request(app).patch(`/api/students/${rec._id}`).set(auth(fx.tokens.admin)).send({ email: 'new.student@t.local' });
     // enrolled in the semester's subjects automatically
     const en = await request(app).get(`/api/students/${res.body.data.student._id}/enrollments`).set(auth(fx.tokens.admin));
     expect(en.body.data).toHaveLength(2);

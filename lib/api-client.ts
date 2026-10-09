@@ -162,15 +162,15 @@ async function request(method: string, url: string, data?: unknown, config: Requ
   }
 }
 
-// Any write may change what a cached GET would return (and login/logout switch users), so it empties the
-// useFetch cache. Registered by hooks/index.ts to avoid an import cycle.
-let onWrite: () => void = () => {};
-export const setWriteHandler = (fn: () => void) => {
+// A write may change what a cached GET would return (and login/logout switch users), so it tells the useFetch cache
+// which URL was written; without a URL the whole cache is dropped. Registered by hooks/index.ts to avoid an import cycle.
+let onWrite: (url?: string) => void = () => {};
+export const setWriteHandler = (fn: (url?: string) => void) => {
   onWrite = fn;
 };
 const write = (method: string, url: string, data?: unknown, config?: RequestConfig) => {
-  onWrite();
-  return request(method, url, data, config).finally(() => onWrite());
+  onWrite(url);
+  return request(method, url, data, config).finally(() => onWrite(url));
 };
 
 export const api = {

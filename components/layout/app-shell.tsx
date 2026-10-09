@@ -99,10 +99,18 @@ function NotificationBell() {
   const router = useRouter();
   const navigate = (to: string) => router.push(to);
 
-  // Check for new notifications every minute so the count updates without a page reload
+  // Check for new notifications every minute so the count updates without a page reload (not while the tab is
+  // hidden; it catches up as soon as the tab is shown again)
   useEffect(() => {
-    const timer = setInterval(count.reload, 60000);
-    return () => clearInterval(timer);
+    const check = () => {
+      if (document.visibilityState === 'visible') count.reload();
+    };
+    const timer = setInterval(check, 60000);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+    };
   }, [count.reload]);
 
   const openItem = async (n) => {

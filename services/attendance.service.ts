@@ -14,27 +14,29 @@ import { audit } from '@/services/audit';
 // Convert an optional query value to a day (or undefined when it is missing).
 const optDay = (v) => (v ? toDay(v) : undefined);
 
-/** Sections a subject is taught to (explicit list, or all sections of program+semester). */
-async function sectionsForSubject(subject) {
-  const filter = subject.sections?.length ? { _id: { $in: subject.sections } } : { program: subject.program, semester: subject.semester };
-  return Section.find({ ...filter, isActive: true })
-    .select('name batch semester')
-    .sort({ name: 1 })
-    .lean();
+/** Sections a subject is taught to (explicit list, or all sections of program+semester), picked from `sections`. */
+function sectionsForSubject(subject, sections) {
+  if (subject.sections?.length) {
+    const ids = new Set(subject.sections.map(String));
+    return sections.filter((sec) => ids.has(String(sec._id)));
+  }
+  const program = String(subject.program?._id ?? subject.program);
+  return sections.filter((sec) => String(sec.program) === program && sec.semester === subject.semester);
 }
 
 /** Classes = subject × section pairs for the "select class" step. */
 export async function classes(ctx: Ctx) {
   const filter: Record<string, any> = { isActive: true };
   if (ctx.user.role === 'faculty') filter.faculty = (await facultyProfile(ctx))._id;
-  const subjects = await Subject.find(filter).populate('program', 'name code').sort({ code: 1 }).lean();
-  const out = [];
-  for (const s of subjects) {
-    out.push({
-      subject: { _id: s._id, code: s.code, name: s.name, semester: s.semester, program: s.program },
-      sections: await sectionsForSubject(s),
-    });
-  }
+  // one query for subjects and one for sections (not one per subject), so the picker loads fast however many subjects there are
+  const [subjects, sections] = await Promise.all([
+    Subject.find(filter).populate('program', 'name code').sort({ code: 1 }).lean(),
+    Section.find({ isActive: true }).select('name batch semester program').sort({ name: 1 }).lean(),
+  ]);
+  const out = subjects.map((s) => ({
+    subject: { _id: s._id, code: s.code, name: s.name, semester: s.semester, program: s.program },
+    sections: sectionsForSubject(s, sections).map(({ program: _program, ...sec }) => sec),
+  }));
   return ok(out);
 }
 

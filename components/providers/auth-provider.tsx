@@ -4,6 +4,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, sessionHint, refreshSession, setSessionExpiredHandler } from '@/lib/api-client';
+import { setCacheOwner } from '@/hooks';
 
 const AuthContext = createContext<any>(null);
 
@@ -25,6 +26,9 @@ export function AuthProvider({
   const [profile, setProfile] = useState<any>(initialProfile);
   // Loading only while we may still be able to restore a session (see the effect below)
   const [loading, setLoading] = useState(!initialUser && sessionHint.has);
+  // Cached responses belong to one user: drop them when it changes. Done during render (it is idempotent) so the
+  // pages below never read another user's cache.
+  if (typeof window !== 'undefined' && !loading) setCacheOwner(user?._id ? String(user._id) : null);
 
   const clear = useCallback(() => {
     sessionHint.clear();

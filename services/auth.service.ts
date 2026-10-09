@@ -118,12 +118,13 @@ export async function register(ctx: Ctx) {
   const student = await Student.findOne({ studentId: String(admissionNumber).toUpperCase() });
   if (!student) throw AppError.badRequest('Admission number not found. Check it, or ask the administrator to add you.');
   if (student.user) throw AppError.conflict('An account has already been created for this admission number. Please sign in.');
-  if (student.email !== email)
-    throw AppError.badRequest('This email does not match the one saved for this admission number. Ask the administrator to update it.');
+  // the student chooses their own login email; it replaces the one on the record (it must not belong to another student)
+  if (student.email !== email && (await Student.exists({ email, _id: { $ne: student._id } }))) throw AppError.conflict(exists);
 
-  const user = await User.create({ name: `${student.firstName} ${student.lastName}`, email, password, role: 'student' });
+  const fullName = [student.firstName, student.lastName].filter((p) => p && p !== '-').join(' ');
+  const user = await User.create({ name: fullName, email, password, role: 'student' });
   // claim the record atomically so two requests cannot both link the same admission number
-  const claimed = await Student.findOneAndUpdate({ _id: student._id, user: null }, { user: user._id });
+  const claimed = await Student.findOneAndUpdate({ _id: student._id, user: null }, { user: user._id, email });
   if (!claimed) {
     await User.deleteOne({ _id: user._id });
     throw AppError.conflict('An account has already been created for this admission number. Please sign in.');

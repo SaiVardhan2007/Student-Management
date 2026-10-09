@@ -3,6 +3,7 @@
 import mongoose from 'mongoose';
 import { registerModel } from './register';
 import { fileSchema } from './academics-ops';
+import { settingsCache } from '@/lib/doc-cache';
 
 const { Schema } = mongoose;
 // Shortcut for a field that stores the _id of a document in another collection.
@@ -205,8 +206,20 @@ const settingsSchema = new Schema(
   },
   { timestamps: true }
 );
+// Any write drops the cached settings (lib/doc-cache.ts).
+settingsSchema.post('save', () => settingsCache.clear());
+settingsSchema.post(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  () => settingsCache.clear()
+);
 export const Settings = registerModel('Settings', settingsSchema);
 
+/** The settings document (cached for a minute; callers may change and save it). */
 export async function getSettings() {
-  return (await Settings.findOne({ key: 'main' })) || Settings.create({ key: 'main' });
+  const cached = settingsCache.get(Settings, 'main');
+  if (cached) return cached;
+  const lean = await Settings.findOne({ key: 'main' }).lean();
+  if (!lean) return Settings.create({ key: 'main' });
+  settingsCache.set('main', lean);
+  return Settings.hydrate(lean);
 }

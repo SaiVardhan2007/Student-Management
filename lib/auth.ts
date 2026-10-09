@@ -5,6 +5,7 @@ import { env } from './env';
 import { AppError } from './errors';
 import type { Ctx } from './context';
 import { connectDB } from './mongodb';
+import { userCache } from './doc-cache';
 import { User, Student, Faculty } from '@/models';
 import type { ApiResult } from './response';
 
@@ -85,11 +86,21 @@ export function readCookie(request: Request, name: string): string | undefined {
   return undefined;
 }
 
+/** The user from the short-lived cache (lib/doc-cache.ts), or from the database on a miss. */
+async function loadUser(id: string) {
+  const cached = userCache.get(User, id);
+  if (cached) return cached;
+  const lean = await User.findById(id).lean();
+  if (!lean) return null;
+  userCache.set(id, lean);
+  return User.hydrate(lean);
+}
+
 /** Loads the (active) user a verified access token belongs to. */
 export async function userFromToken(token: string) {
   const payload = await verifyAccessToken(token);
   await connectDB();
-  const user = await User.findById(payload.sub);
+  const user = await loadUser(String(payload.sub));
   if (!user) throw AppError.unauthorized('Account no longer exists');
   if (!user.isActive) throw AppError.forbidden('Your account has been deactivated. Contact the administrator.');
   // tokens carry the password-change stamp they were issued under; a change invalidates them all

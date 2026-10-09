@@ -2,6 +2,7 @@
 import mongoose from 'mongoose';
 import { registerModel } from './register';
 import bcrypt from 'bcryptjs';
+import { userCache } from '@/lib/doc-cache';
 
 const { Schema } = mongoose;
 // Shortcut for a field that stores the _id of a document in another collection.
@@ -66,6 +67,14 @@ userSchema.set('toJSON', {
     return ret;
   },
 });
+
+// A changed or deleted user must not be served from the login cache (lib/doc-cache.ts).
+userSchema.post('save', (doc: any) => userCache.delete(String(doc._id)));
+userSchema.post('deleteOne', { document: true, query: false }, (doc: any) => userCache.delete(String(doc._id)));
+userSchema.post(
+  ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne', 'deleteOne', 'deleteMany', 'findOneAndDelete'] as any,
+  () => userCache.clear()
+);
 
 export const User = registerModel('User', userSchema);
 
